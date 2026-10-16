@@ -1,17 +1,41 @@
 <!doctype html>
-<html lang="it">
+<html lang="it" data-theme="dark">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#0b6e6e" />
+  <meta name="theme-color" content="#06121f" />
+  <link rel="icon" href="./favicon.png" />
   <title>BillRadar</title>
-  <link rel="stylesheet" href="/src/style.css" />
 </head>
 <body>
-  <header class="top"><h1><span class="logo">◉</span> BillRadar</h1><button id="syncBtn" class="ghost" title="Sincronizza Gmail">⟳ Sincronizza</button></header>
+  <!-- Splash animato: radar che scansiona + battito + logo -->
+  <div id="splash" aria-hidden="true">
+    <div class="sp-radar"><i></i><i></i><i></i><b></b></div>
+    <img class="sp-mark" src="./logo-mark.png" alt="" />
+    <div class="sp-word"><span>B</span><span>i</span><span>l</span><span>l</span><span>R</span><span>a</span><span>d</span><span>a</span><span>r</span></div>
+    <div class="sp-sub">le tue bollette, sempre sotto controllo</div>
+  </div>
+
+  <header class="top">
+    <div class="brand">
+      <img class="mark" src="./logo-symbol.png" alt="" />
+      <span class="word">BillRadar</span>
+    </div>
+    <button id="syncBtn" class="sync" aria-label="Sincronizza Gmail">
+      <span class="ring"></span><span class="ring r2"></span>
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg>
+    </button>
+    <svg class="ecg" viewBox="0 0 400 14" preserveAspectRatio="none" aria-hidden="true">
+      <path class="base" d="M0 8 H110 l6 -2 6 6 8 -11 8 14 6 -7 H250 l6 -2 6 6 8 -11 8 14 6 -7 H400"/>
+      <path class="beat" d="M0 8 H110 l6 -2 6 6 8 -11 8 14 6 -7 H250 l6 -2 6 6 8 -11 8 14 6 -7 H400"/>
+    </svg>
+  </header>
   <div id="progress" class="progress" hidden><div></div><span></span></div>
+
   <main id="view"></main>
-  <nav class="tabs">
+
+  <nav class="tabs" id="tabs">
+    <span class="indicator"></span>
     <a href="#/home" data-tab="home"><i>🏠</i>Home</a>
     <a href="#/docs" data-tab="docs"><i>🧾</i>Documenti</a>
     <a href="#/stats" data-tab="stats"><i>📊</i>Statistiche</a>

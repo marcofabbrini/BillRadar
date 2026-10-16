@@ -38,7 +38,7 @@ export const SETTINGS_SCHEMA = [
   {
     id: 'appearance', title: 'Aspetto', icon: '🎨',
     items: [
-      { key: 'ui.theme', type: 'select', label: 'Tema', options: [['auto', 'Automatico'], ['light', 'Chiaro'], ['dark', 'Scuro']], default: 'auto' },
+      { key: 'ui.theme', type: 'select', label: 'Tema', options: [['dark', 'Scuro (neon)'], ['light', 'Chiaro'], ['auto', 'Automatico']], default: 'dark' },
     ],
   },
   {

@@ -1,3 +1,7 @@
+import '@fontsource/montserrat/latin-500.css';
+import '@fontsource/montserrat/latin-600.css';
+import '@fontsource/montserrat/latin-700.css';
+import './style.css';
 import { CATEGORIES } from './parser.js';
 import { db, listBills, addBill, updateBill, deleteBill, exportAll, importAll, wipeAll, billsToCSV, getKV } from './db.js';
 import { SETTINGS_SCHEMA, getSetting, setSetting, allSettings } from './settings.js';
@@ -11,6 +15,26 @@ const state = { year: new Date().getFullYear(), filter: 'all', q: '', statCat: '
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const cat = (id) => CATEGORIES[id] || { label: 'Altro', icon: '📄', color: '#888', kind: 'cost', unit: '' };
 const fmtDate = (d) => (d ? d.split('-').reverse().join('/') : '—');
+
+function emptyState(title, text) {
+  return `<div class="empty"><div class="radar-ico"><img src="./logo-symbol.png" alt=""></div><b>${title}</b><div>${text}</div></div>`;
+}
+
+// numeri che "salgono" fino al valore finale
+function animateCounts() {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  view.querySelectorAll('[data-count]').forEach((el) => {
+    const target = Number(el.dataset.count);
+    if (!Number.isFinite(target) || target === 0) return;
+    const t0 = performance.now(), dur = 900 + Math.min(600, Math.abs(target) / 20);
+    const tick = (now) => {
+      const p = Math.min(1, (now - t0) / dur);
+      el.textContent = eur(target * (1 - Math.pow(1 - p, 3)));
+      if (p < 1) requestAnimationFrame(tick); else el.textContent = eur(target);
+    };
+    requestAnimationFrame(tick);
+  });
+}
 
 function toast(msg, ms = 3200) {
   const t = $('#toast'); t.textContent = msg; t.hidden = false;
@@ -29,7 +53,7 @@ function stackedBars(byCat, ids) {
       const v = byCat[id]?.[m] || 0; if (!v) continue;
       const h = (v / max) * (H - 36);
       y -= h;
-      g += `<rect x="${pad + m * bw + 3}" y="${y}" width="${bw - 6}" height="${h}" rx="2" fill="${cat(id).color}"/>`;
+      g += `<rect class="bar" style="--m:${m}" x="${pad + m * bw + 3}" y="${y}" width="${bw - 6}" height="${h}" rx="3" fill="${cat(id).color}"/>`;
     }
     g += `<text x="${pad + m * bw + bw / 2}" y="${H - 5}" text-anchor="middle">${MONTH_LABELS[m][0]}</text>`;
   }
@@ -41,7 +65,7 @@ function simpleBars(vals, color) {
   let g = '';
   vals.forEach((v, m) => {
     const h = (v / max) * (H - 30);
-    g += `<rect x="${pad + m * bw + 3}" y="${H - 16 - h}" width="${bw - 6}" height="${h}" rx="2" fill="${color}"/>`;
+    g += `<rect class="bar" style="--m:${m}" x="${pad + m * bw + 3}" y="${H - 16 - h}" width="${bw - 6}" height="${h}" rx="3" fill="${color}"/>`;
     g += `<text x="${pad + m * bw + bw / 2}" y="${H - 3}" text-anchor="middle">${MONTH_LABELS[m][0]}</text>`;
   });
   return `<svg viewBox="0 0 ${W} ${H}" width="100%">${g}</svg>`;
@@ -67,23 +91,24 @@ async function renderHome() {
   view.innerHTML = `
     ${reauth ? '<div class="card" style="border-color:var(--bad)"><b>Gmail non è più collegato.</b> <button class="btn" id="reauth" style="margin-top:8px;width:100%">Riconnetti Gmail</button></div>' : ''}
     <select id="yr" aria-label="Anno">${ys.map((v) => `<option ${v === state.year ? 'selected' : ''}>${v}</option>`).join('')}</select>
-    <div class="grid" style="margin-top:12px">
-      <div class="kpi"><small>Spese ${state.year}</small><b>${eur(t.spese)}</b>
+    <div class="grid enter" style="margin-top:12px;--i:1">
+      <div class="kpi glow"><small>Spese ${state.year}</small><b data-count="${t.spese}">${eur(t.spese)}</b>
         ${y.pct != null ? `<small class="${y.pct > 0 ? 'neg' : 'pos'}">${y.pct > 0 ? '▲' : '▼'} ${num(Math.abs(y.pct), 1)}% vs ${state.year - 1}</small>` : '<small>&nbsp;</small>'}</div>
-      <div class="kpi"><small>Acconti GSE</small><b class="pos">${eur(t.entrate)}</b>
+      <div class="kpi"><small>Acconti GSE</small><b class="pos" data-count="${t.entrate}">${eur(t.entrate)}</b>
         <small>Saldo <span class="${t.saldo >= 0 ? 'pos' : 'neg'}">${eur(t.saldo)}</span></small></div>
     </div>
-    ${review ? `<div class="card" style="margin-top:12px"><b>${review}</b> document${review > 1 ? 'i' : 'o'} da verificare <a href="#/docs" data-filter="review" style="float:right">Apri →</a></div>` : ''}
-    <div class="card" style="margin-top:12px"><h3>Spesa mensile</h3>${bills.length ? stackedBars(byCat, ids) : '<div class="empty">Nessun dato. Collega Gmail e sincronizza.</div>'}
+    ${review ? `<div class="card enter" style="--i:2"><b>${review}</b> document${review > 1 ? 'i' : 'o'} da verificare <a href="#/docs" data-filter="review" style="float:right">Apri →</a></div>` : ''}
+    <div class="card enter" style="--i:2"><h3>Spesa mensile</h3>${bills.length ? stackedBars(byCat, ids) : emptyState('Nessun dato ancora', 'Collega Gmail e tocca ⟳ per cercare le bollette.')}
       <div class="legend">${ids.map((id) => `<span><i style="background:${cat(id).color}"></i>${cat(id).label}</span>`).join('')}</div></div>
-    <div class="card"><h3>Per categoria</h3>${ids.map((id) => {
+    <div class="card enter" style="--i:3"><h3>Per categoria</h3>${ids.map((id) => {
       const v = t.perCategoria[id] || 0;
-      return `<div class="row"><div class="ico" style="background:${cat(id).color}22">${cat(id).icon}</div><div class="grow"><div class="t">${cat(id).label}</div></div><b class="${cat(id).kind === 'income' ? 'pos' : ''}">${eur(v)}</b></div>`;
+      return `<div class="row"><div class="ico" style="background:${cat(id).color}22">${cat(id).icon}</div><div class="grow"><div class="t">${cat(id).label}</div></div><b class="${cat(id).kind === 'income' ? 'pos' : ''}" data-count="${v}">${eur(v)}</b></div>`;
     }).join('')}</div>
-    ${next.length ? `<div class="card"><h3>Prossime scadenze</h3>${next.slice(0, 5).map((b) => billRow(b, true)).join('')}</div>` : ''}`;
+    ${next.length ? `<div class="card enter" style="--i:4"><h3>Prossime scadenze</h3>${next.slice(0, 5).map((b) => billRow(b, true)).join('')}</div>` : ''}`;
   $('#yr').onchange = (e) => { state.year = Number(e.target.value); renderHome(); };
   if (reauth) $('#reauth').onclick = () => runAction('action.connect');
   view.querySelectorAll('.row[data-id]').forEach((r) => (r.onclick = () => openBill(Number(r.dataset.id))));
+  animateCounts();
 }
 
 function billRow(b, showDue = false) {
@@ -107,7 +132,7 @@ async function renderDocs() {
     <div class="chips" style="margin-top:10px">
       ${[['all', 'Tutti'], ['review', 'Da verificare'], ...ids.map((id) => [id, cat(id).label])].map(([k, l]) => `<button class="chip ${f === k ? 'on' : ''}" data-f="${k}">${l}</button>`).join('')}
     </div>
-    <div class="card">${rows.length ? rows.map((b) => billRow(b)).join('') : '<div class="empty">Nessun documento.</div>'}</div>
+    <div class="card enter" style="--i:1">${rows.length ? rows.map((b) => billRow(b)).join('') : emptyState('Nessun documento', 'Qui compariranno le bollette trovate in Gmail.')}</div>
     <button class="btn" id="add" style="width:100%">+ Aggiungi manualmente</button>`;
   $('#q').oninput = (e) => { state.q = e.target.value; clearTimeout(renderDocs.t); renderDocs.t = setTimeout(renderDocs, 250); };
   view.querySelectorAll('.chip').forEach((c) => (c.onclick = () => { state.filter = c.dataset.f; renderDocs(); }));
@@ -165,12 +190,12 @@ async function renderStats() {
   view.innerHTML = `
     <div style="display:flex;gap:8px"><select id="cat">${ids.map((id) => `<option value="${id}" ${id === state.statCat ? 'selected' : ''}>${cat(id).icon} ${cat(id).label}</option>`).join('')}</select>
     <select id="yr" style="width:110px">${ys.map((v) => `<option ${v === state.year ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
-    <div class="card" style="margin-top:12px"><h3>${c.kind === 'income' ? 'Entrate' : 'Spesa'} mensile · ${state.year}</h3>${simpleBars(byCat[state.statCat], c.color)}
+    <div class="card enter" style="margin-top:12px;--i:1"><h3>${c.kind === 'income' ? 'Entrate' : 'Spesa'} mensile · ${state.year}</h3>${simpleBars(byCat[state.statCat], c.color)}
       <div class="grid" style="margin-top:8px"><div><small class="mut">Totale</small><br><b>${eur(tot)}</b></div><div><small class="mut">Media/mese</small><br><b>${eur(tot / 12)}</b></div></div></div>
-    ${c.unit && cons.count ? `<div class="card"><h3>Consumo (${c.unit})</h3>${simpleBars(cons.monthly, c.color)}
+    ${c.unit && cons.count ? `<div class="card enter" style="--i:2"><h3>Consumo (${c.unit})</h3>${simpleBars(cons.monthly, c.color)}
       <div class="grid" style="margin-top:8px"><div><small class="mut">Totale</small><br><b>${num(cons.qty, 1)} ${c.unit}</b></div>
       <div><small class="mut">Prezzo medio</small><br><b>${cons.avgPrice != null ? eur(cons.avgPrice) + '/' + c.unit : '—'}</b></div></div></div>` : ''}
-    ${ids.includes('gse') && ids.includes('luce') ? `<div class="card"><h3>Fotovoltaico vs bollette luce</h3>
+    ${ids.includes('gse') && ids.includes('luce') ? `<div class="card enter" style="--i:3"><h3>Fotovoltaico vs bollette luce</h3>
       <div class="row"><div class="grow">Costo luce</div><b>${eur(luceCost)}</b></div>
       <div class="row"><div class="grow">Acconti GSE</div><b class="pos">${eur(gseIn)}</b></div>
       <div class="row"><div class="grow"><b>Costo netto energia</b></div><b class="${luceCost - gseIn <= 0 ? 'pos' : ''}">${eur(luceCost - gseIn)}</b></div></div>` : ''}`;
@@ -182,9 +207,9 @@ async function renderStats() {
 async function renderSettings() {
   const connected = await gmail.isConnected();
   const last = await getKV('gmail.lastSync');
-  let html = '';
+  let html = '', gi = 0;
   for (const sec of SETTINGS_SCHEMA) {
-    html += `<div class="set-group"><h2>${sec.icon} ${sec.title}</h2><div class="card" style="padding:4px 14px">`;
+    html += `<div class="set-group enter" style="--i:${gi++}"><h2>${sec.icon} ${sec.title}</h2><div class="card" style="padding:4px 14px">`;
     for (const it of sec.items) {
       const v = await getSetting(it.key);
       const hint = it.hint ? `<div class="hint">${esc(it.hint)}</div>` : '';
@@ -238,19 +263,48 @@ async function doSync() {
   try {
     if (!(await gmail.isConnected())) { toast('Collega prima Gmail in Impostazioni'); location.hash = '#/settings'; return; }
     bar.hidden = false;
+    $('#syncBtn').classList.add('busy');
     const r = await gmail.sync((i, n) => { $('div', bar).style.width = `${(i / n) * 100}%`; $('span', bar).textContent = `Analizzo ${i}/${n}`; });
     toast(`Sincronizzato: ${r.added} nuovi, ${r.skipped} già presenti${r.errors ? `, ${r.errors} errori` : ''}`, 5000);
   } catch (e) { toast(e.message, 6000); }
   bar.hidden = true;
+  $('#syncBtn').classList.remove('busy');
   route();
 }
 $('#syncBtn').onclick = doSync;
+// effetto onda al tocco sui pulsanti
+document.addEventListener('pointerdown', (e) => {
+  const b = e.target.closest('.btn');
+  if (!b) return;
+  const r = b.getBoundingClientRect(), d = Math.max(r.width, r.height) * 1.6;
+  const w = document.createElement('span');
+  w.style.cssText = `position:absolute;border-radius:50%;pointer-events:none;background:rgba(255,255,255,.45);width:${d}px;height:${d}px;left:${e.clientX - r.left - d / 2}px;top:${e.clientY - r.top - d / 2}px;transform:scale(0);opacity:1;transition:transform .55s ease-out,opacity .55s`;
+  b.appendChild(w);
+  requestAnimationFrame(() => { w.style.transform = 'scale(1)'; w.style.opacity = '0'; });
+  setTimeout(() => w.remove(), 600);
+});
 
 // ---------- router ----------
+function moveIndicator() {
+  const a = $('.tabs a.on'), ind = $('.tabs .indicator');
+  if (!a || !ind) return;
+  ind.style.width = `${a.offsetWidth}px`;
+  ind.style.transform = `translateX(${a.offsetLeft - 6}px)`;
+}
+window.addEventListener('resize', moveIndicator);
+
+function hideSplash() {
+  const sp = $('#splash');
+  if (!sp) return;
+  sp.classList.add('hide');
+  setTimeout(() => sp.remove(), 800);
+}
+
 function applyTheme(t) { document.documentElement.dataset.theme = t || 'auto'; }
 async function route() {
   const tab = (location.hash.replace('#/', '') || 'home');
   document.querySelectorAll('.tabs a').forEach((a) => a.classList.toggle('on', a.dataset.tab === tab));
+  moveIndicator();
   ({ home: renderHome, docs: renderDocs, stats: renderStats, settings: renderSettings }[tab] || renderHome)();
   window.scrollTo(0, 0);
 }
@@ -259,7 +313,11 @@ window.addEventListener('hashchange', route);
 
 (async () => {
   applyTheme(await getSetting('ui.theme'));
+  const t0 = performance.now();
   await route();
+  const calm = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  setTimeout(hideSplash, Math.max(0, (calm ? 250 : 2300) - (performance.now() - t0)));
+  $('#splash')?.addEventListener('click', hideSplash);
   await gmail.keepAlive();
   if ((await getSetting('gmail.auto')) && (await gmail.isConnected())) doSync();
 })();
