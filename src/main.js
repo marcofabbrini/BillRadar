@@ -229,7 +229,7 @@ async function openBill(id) {
     <div id="pdfbox" style="margin-top:10px"></div>
     <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
       <button class="btn" id="save">Salva</button>
-      ${b.pdf ? '<button class="btn sec" id="pdfBtn">Vedi PDF</button>' : ''}
+      ${b.pdf || b.driveFileId ? '<button class="btn sec" id="pdfBtn">Vedi PDF</button>' : ''}
       ${canDrive ? '<button class="btn sec" id="driveBtn">☁️ Salva su Drive</button>' : ''}
       ${id ? '<button class="btn danger" id="del">Elimina</button>' : ''}
       <button class="btn sec" id="close">Chiudi</button></div>`;
@@ -242,7 +242,12 @@ async function openBill(id) {
       dlg.close(); toast(`Salvato su Drive: ${path}`); route();
     } catch (e) { toast(e.message, 7000); }
   };
-  if (b.pdf) $('#pdfBtn', dlg).onclick = async () => renderPdf(await b.pdf.arrayBuffer(), $('#pdfbox', dlg));
+  if (b.pdf || b.driveFileId) $('#pdfBtn', dlg).onclick = async () => {
+    try {
+      const blob = b.pdf || await drive.downloadPdf(b);   // PDF non più sul telefono: lo scarica da Drive
+      await renderPdf(await blob.arrayBuffer(), $('#pdfbox', dlg));
+    } catch (e) { toast(e.message, 6000); }
+  };
   if (id) $('#del', dlg).onclick = async () => { if (confirm('Eliminare questo documento?')) { await deleteBill(id); dlg.close(); route(); } };
   $('#save', dlg).onclick = async () => {
     const patch = {};
@@ -253,7 +258,15 @@ async function openBill(id) {
     patch.unit = cat(patch.category).unit;
     patch.needsReview = false;
     if (id) await updateBill(id, patch); else await addBill({ ...b, ...patch });
-    dlg.close(); toast('Salvato'); route();
+    let note = '';
+    if (id && b.driveFileId && (await drive.isDriveEnabled())) {
+      // dati cambiati → il file su Drive viene rinominato/spostato di conseguenza
+      try {
+        const r = await drive.archiveBill({ ...b, ...patch }, b.pdf);
+        if (r) await updateBill(id, { driveFileId: r.fileId, drivePath: r.path });
+      } catch (e) { note = ` (Drive non aggiornato: ${e.message})`; }
+    }
+    dlg.close(); toast(`Salvato${note}`, note ? 7000 : 2500); route();
   };
 }
 
@@ -292,6 +305,7 @@ async function renderSettings() {
   const last = await getKV('gmail.lastSync');
   let html = '', gi = 0;
   const catHtml = await catSettingsHtml();
+  const stoHtml = await storageHtml();
   for (const sec of SETTINGS_SCHEMA) {
     html += `<details class="set-group enter" data-sec="${sec.id}" ${state.openSet.has(sec.id) ? 'open' : ''} style="--i:${gi++}"><summary><span>${sec.icon} ${sec.title}</span><i class="chev"></i></summary><div class="card" style="padding:4px 14px">`;
     for (const it of sec.items) {
@@ -304,6 +318,7 @@ async function renderSettings() {
         const label = it.key === 'action.connect' ? (connected ? 'Scollega Gmail' : (await gmail.needsReauth()) ? 'Riconnetti Gmail' : 'Collega Gmail') : it.label;
         html += `<div class="set-item"><div>${it.label}${it.key === 'action.connect' ? `<div class="hint">${connected ? 'Collegato' : 'Non collegato'}${last ? ' · ultimo sync ' + new Date(last).toLocaleString('it-IT') : ''}</div>` : hint}</div><button class="btn ${it.danger ? 'danger' : 'sec'}" data-a="${it.key}">${it.key === 'action.connect' ? label : 'Esegui'}</button></div>`;
       } else if (it.type === 'categories') html += catHtml;
+      else if (it.type === 'storage') html += stoHtml;
       else html += `<div class="set-item mut">${it.label}</div>`;
     }
     html += '</div></details>';
@@ -381,6 +396,21 @@ function openCategoryDialog() {
   };
 }
 
+const fmtBytes = (n) => (n == null ? '—' : n >= 1048576 ? `${(n / 1048576).toFixed(1).replace('.', ',')} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+
+async function storageHtml() {
+  const u = await drive.localUsage();
+  const rows = [
+    ['Documenti', String(u.docs)],
+    ['PDF sul telefono', `${u.pdfs} · ${fmtBytes(u.pdfBytes)}`],
+    ['di cui già su Drive', String(u.onDrive)],
+    ['Totale app (stima)', u.usage != null ? fmtBytes(u.usage) : '—'],
+  ];
+  return `<div style="padding:10px 0;border-bottom:1px solid var(--line)"><div>Spazio occupato</div>
+    ${rows.map(([k, v]) => `<div class="row" style="padding:6px 0"><div class="grow mut">${k}</div><b>${v}</b></div>`).join('')}
+    <div class="hint">I dati estratti pesano pochissimo (circa 1 KB a documento): lo spazio è quasi tutto nei PDF.</div></div>`;
+}
+
 function download(name, text, type) {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([text], { type }));
@@ -400,6 +430,26 @@ async function runAction(key) {
         const r = await drive.archivePending((i, n) => { $('div', bar).style.width = `${(i / n) * 100}%`; $('span', bar).textContent = `Carico su Drive ${i}/${n}`; });
         toast(r.total === 0 ? 'Nessun documento da archiviare' : `Su Drive: ${r.done} caricati${r.errors ? `, ${r.errors} errori. ${r.firstError}` : ''}`, r.errors ? 8000 : 4500);
       } finally { bar.hidden = true; }
+      await renderSettings();
+    } else if (key === 'action.driveBackup') {
+      if (!(await drive.isDriveEnabled())) { toast('Attiva prima "Archivia su Google Drive"'); return; }
+      const r = await drive.backupToDrive(await exportAll());
+      toast(`Backup salvato in ${r.path}: ${r.name}${r.replaced ? ' (aggiornato)' : ''}`, 6000);
+    } else if (key === 'action.driveRestore') {
+      if (!(await drive.isDriveEnabled())) { toast('Attiva prima "Archivia su Google Drive"'); return; }
+      const { name, json } = await drive.restoreFromDrive();
+      if (!confirm(`Ripristinare i dati da ${name}? I documenti già presenti non vengono duplicati.`)) return;
+      const r = await importAll(json); await loadCategories();
+      toast(`Ripristino da ${name}: ${r.added} documenti recuperati, ${r.skipped} già presenti`, 7000); route();
+    } else if (key === 'action.driveFree') {
+      if (!(await drive.isDriveEnabled())) { toast('Attiva prima "Archivia su Google Drive"'); return; }
+      if (!confirm('Rimuovere dal telefono i PDF già presenti su Drive? Resteranno consultabili da Drive.')) return;
+      const bar = $('#progress'); bar.hidden = false;
+      try {
+        const r = await drive.freeLocalPdfs((i, n) => { $('div', bar).style.width = `${(i / n) * 100}%`; $('span', bar).textContent = `Verifico ${i}/${n}`; });
+        toast(r.freed ? `Liberati ${fmtBytes(r.bytes)} (${r.freed} PDF)${r.skipped ? `, ${r.skipped} non trovati su Drive: tenuti sul telefono` : ''}` : 'Nessun PDF da rimuovere', 6000);
+      } finally { bar.hidden = true; }
+      route();
     } else if (key === 'action.exportJson') download(`billradar-${Date.now()}.json`, JSON.stringify(await exportAll(), null, 2), 'application/json');
     else if (key === 'action.exportCsv') download(`billradar-${Date.now()}.csv`, billsToCSV(await listBills()), 'text/csv');
     else if (key === 'action.import') {
@@ -421,6 +471,9 @@ async function doSync() {
     $('#syncBtn').classList.add('busy');
     const hook = drive.syncHook();
     const r = await gmail.sync((i, n) => { $('div', bar).style.width = `${(i / n) * 100}%`; $('span', bar).textContent = `Analizzo ${i}/${n}`; }, hook);
+    if (await getSetting('drive.autoBackup') && (await drive.isDriveEnabled())) {
+      try { await drive.backupToDrive(await exportAll()); } catch (e) { hook.errors.push(`backup: ${e.message}`); }
+    }
     const onDrive = hook.uploaded ? `, ${hook.uploaded} su Drive` : '';
     toast(`Sincronizzato: ${r.added} nuovi${onDrive}, ${r.skipped} già presenti${r.errors ? `, ${r.errors} errori` : ''}${hook.errors.length ? `. Drive: ${hook.errors[0]}` : ''}`, hook.errors.length ? 9000 : 5000);
   } catch (e) { toast(e.message, 6000); }

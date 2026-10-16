@@ -58,6 +58,13 @@ Per attivarlo:
 
 Nota: con `drive.file` l'app non riusa una cartella "BillRadar" creata a mano; ne crea una propria.
 
+### Nessun doppione, backup e ripristino
+
+- Prima di caricare, l'app cerca nella cartella di destinazione un file con lo stesso nome: se c'è, ne aggiorna il contenuto invece di crearne un secondo. Se modifichi una bolletta (categoria, data, fornitore, importo) il file su Drive viene rinominato e spostato di conseguenza.
+- **Backup** (JSON con i dati estratti) in `BillRadar/Service/billradar-backup-AAAA-MM-GG.json`: un file al giorno, quello dello stesso giorno viene sovrascritto. Manuale da "Esegui backup su Drive", oppure automatico dopo ogni sincronizzazione.
+- **Ripristino**: "Ripristina da Drive" prende l'ultimo backup e reinserisce i documenti senza duplicare quelli già presenti. I PDF restano su Drive e si aprono da "Vedi PDF". Per ritrovare i file dopo una reinstallazione serve lo stesso Client ID.
+- **Libera spazio**: toglie dal telefono i PDF già presenti su Drive (controlla uno per uno che esistano ancora). Impostazioni → Dati mostra quanto spazio occupano i documenti.
+
 ## Limiti noti
 
 - I PDF scansionati come immagine (senza testo) non vengono letti: finiscono tra i "da verificare" o vengono saltati. Non c'è OCR.

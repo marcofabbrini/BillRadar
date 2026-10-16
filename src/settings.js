@@ -21,6 +21,10 @@ export const SETTINGS_SCHEMA = [
     items: [
       { key: 'drive.enabled', type: 'toggle', label: 'Archivia su Google Drive', hint: 'Facoltativo. Salva i PDF in BillRadar / Anno / Mese / Tipologia nel tuo Drive.', default: false },
       { key: 'action.driveSync', type: 'action', label: 'Archivia ora i documenti già presenti', hint: 'Carica su Drive le bollette salvate prima di attivare l\'archivio.' },
+      { key: 'drive.autoBackup', type: 'toggle', label: 'Backup automatico dei dati', hint: 'Dopo ogni sincronizzazione salva un file JSON in BillRadar / Service (uno al giorno).', default: false },
+      { key: 'action.driveBackup', type: 'action', label: 'Esegui backup su Drive', hint: 'Salva i dati estratti (JSON) in BillRadar / Service.' },
+      { key: 'action.driveRestore', type: 'action', label: 'Ripristina da Drive', hint: 'Recupera l\'ultimo backup dalla cartella Service. Non crea doppioni.' },
+      { key: 'action.driveFree', type: 'action', label: 'Libera spazio sul telefono', hint: 'Toglie dal telefono i PDF già presenti su Drive; restano apribili da Drive.' },
     ],
   },
   {
@@ -45,6 +49,7 @@ export const SETTINGS_SCHEMA = [
   {
     id: 'data', title: 'Dati', icon: '💾',
     items: [
+      { key: 'storage.info', type: 'storage', label: 'Spazio occupato' },
       { key: 'action.exportJson', type: 'action', label: 'Esporta backup (JSON)' },
       { key: 'action.exportCsv', type: 'action', label: 'Esporta tabella (CSV)' },
       { key: 'action.import', type: 'action', label: 'Importa backup' },

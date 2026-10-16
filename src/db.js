@@ -33,19 +33,21 @@ export async function exportAll() {
     app: 'BillRadar', version: 1, exportedAt: new Date().toISOString(),
     // i PDF non vengono inclusi nel JSON (solo i dati estratti)
     bills: bills.map(({ pdf, ...rest }) => rest),
-    settings: kv.filter((r) => !r.key.startsWith('gmail.')),
+    settings: kv.filter((r) => !r.key.startsWith('gmail.') && !r.key.startsWith('drive.')),
   };
 }
 
 export async function importAll(json) {
   if (json?.app !== 'BillRadar') throw new Error('File non valido');
+  let added = 0, skipped = 0;
   for (const b of json.bills || []) {
     const { id, ...rest } = b;
-    const dup = rest.messageId && rest.attachmentId
-      ? await billExists(rest.messageId, rest.attachmentId) : false;
-    if (!dup) await db.bills.add(rest);
+    const dup = (rest.messageId && rest.attachmentId && await billExists(rest.messageId, rest.attachmentId))
+      || (rest.driveFileId && !!(await db.bills.filter((x) => x.driveFileId === rest.driveFileId).first()));
+    if (dup) skipped++; else { await db.bills.add(rest); added++; }
   }
   for (const r of json.settings || []) await db.kv.put(r);
+  return { added, skipped };
 }
 
 export async function wipeAll() {
