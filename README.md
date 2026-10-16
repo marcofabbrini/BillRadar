@@ -65,6 +65,16 @@ Nota: con `drive.file` l'app non riusa una cartella "BillRadar" creata a mano; n
 - **Ripristino**: "Ripristina da Drive" prende l'ultimo backup e reinserisce i documenti senza duplicare quelli già presenti. I PDF restano su Drive e si aprono da "Vedi PDF". Per ritrovare i file dopo una reinstallazione serve lo stesso Client ID.
 - **Libera spazio**: toglie dal telefono i PDF già presenti su Drive (controlla uno per uno che esistano ancora). Impostazioni → Dati mostra quanto spazio occupano i documenti.
 
+## Filtro delle mail
+
+In **Impostazioni → Gmail** scegli quali mail analizzare:
+
+- **Indirizzi da cui arrivano le bollette**: uno per riga (indirizzo completo, oppure un intero dominio come `@enel.com`). Di default: `noreply.enelenergia@enel.com` e `contotelefonico@fatturazione.windtre.it`.
+- **Testo contenuto nella mail**: facoltativo; la mail deve contenere almeno uno dei testi (oggetto o corpo).
+- **Cerca anche per parole generiche**: aggiunge le mail con "bolletta", "fattura", "GSE", "bollo"… di qualsiasi mittente (spento di default).
+
+Sotto i campi vedi la ricerca Gmail che ne risulta. Solo le mail con un PDF allegato vengono considerate: i mittenti non elencati non vengono letti.
+
 ## Quando l'app cerca le bollette
 
 - **All'apertura** (se attivo in Impostazioni → Gmail): guarda solo le mail degli ultimi 7 giorni.

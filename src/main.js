@@ -7,6 +7,7 @@ import * as gmail from './gmail.js';
 import * as drive from './drive.js';
 import { renderPdf } from './pdf.js';
 import { pushWidget } from './widget.js';
+import { buildGmailQuery, invalidSenders } from './query.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const view = $('#view');
@@ -340,11 +341,40 @@ async function renderSettings() {
         html += `<div class="set-item"><div>${it.label}${it.key === 'action.connect' ? `<div class="hint">${connected ? 'Collegato' : 'Non collegato'}${last ? ' · ultimo sync ' + new Date(last).toLocaleString('it-IT') : ''}</div>` : hint}</div><button class="btn ${it.danger ? 'danger' : 'sec'}" data-a="${it.key}">${it.key === 'action.connect' ? label : 'Esegui'}</button></div>`;
       } else if (it.type === 'categories') html += catHtml;
       else if (it.type === 'storage') html += stoHtml;
+      else if (it.type === 'list') {
+        const arr = Array.isArray(v) ? v : [];
+        html += `<div class="list-set" data-list="${it.key}" style="padding:10px 0;border-bottom:1px solid var(--line)"><div>${it.label}</div>${hint}
+          ${arr.map((val, i) => `<div class="li"><input type="text" inputmode="${it.key === 'gmail.senders' ? 'email' : 'text'}" autocapitalize="none" autocomplete="off" spellcheck="false" data-l="${it.key}" data-i="${i}" value="${esc(val)}" placeholder="${esc(it.placeholder || '')}"><button class="icon-btn" data-ldel="${it.key}" data-i="${i}" aria-label="Rimuovi">✕</button></div>`).join('')}
+          <button class="btn sec" data-ladd="${it.key}" style="margin-top:8px">+ Aggiungi</button></div>`;
+      } else if (it.type === 'preview') html += `<div style="padding:10px 0"><div>${it.label}</div><div class="hint qprev" id="qprev">${esc(await previewQuery())}</div><div class="hint bad" id="qwarn"></div></div>`;
       else html += `<div class="set-item mut">${it.label}</div>`;
     }
     html += '</div></details>';
   }
   view.innerHTML = html + `<p class="mut" style="text-align:center">BillRadar ${__APP_VERSION__} · dati salvati solo su questo dispositivo</p>`;
+
+  // elenchi (mittenti, testi): ogni riga si salva da sola; la ricerca risultante si aggiorna subito
+  const readList = (key) => [...view.querySelectorAll(`input[data-l="${key}"]`)].map((i) => i.value);
+  const refreshPreview = async () => {
+    const q = $('#qprev'); if (!q) return;
+    q.textContent = await previewQuery(readList('gmail.senders'), readList('gmail.keywords'));
+    const bad = invalidSenders(readList('gmail.senders'));
+    $('#qwarn').textContent = bad.length ? `Indirizzo non valido, ignorato: ${bad.join(', ')}` : '';
+  };
+  view.querySelectorAll('input[data-l]').forEach((el) => {
+    el.oninput = refreshPreview;
+    el.onchange = async () => { await setSetting(el.dataset.l, readList(el.dataset.l).map((x) => x.trim()).filter(Boolean)); refreshPreview(); };
+  });
+  view.querySelectorAll('[data-ldel]').forEach((el) => (el.onclick = async () => {
+    const key = el.dataset.ldel, list = readList(key); list.splice(Number(el.dataset.i), 1);
+    await setSetting(key, list.map((x) => x.trim()).filter(Boolean)); renderSettings();
+  }));
+  view.querySelectorAll('[data-ladd]').forEach((el) => (el.onclick = async () => {
+    const key = el.dataset.ladd, list = readList(key).map((x) => x.trim()).filter(Boolean);
+    await setSetting(key, [...list, '']);
+    await renderSettings();
+    [...view.querySelectorAll(`input[data-l="${key}"]`)].pop()?.focus();
+  }));
 
   view.querySelectorAll('[data-s]').forEach((el) => (el.onchange = async () => {
     const val = el.type === 'checkbox' ? el.checked : el.value;
@@ -360,6 +390,7 @@ async function renderSettings() {
     }
     await setSetting(el.dataset.s, val);
     if (el.dataset.s === 'ui.theme') applyTheme(val);
+    if (el.dataset.s === 'gmail.generic') refreshPreview();
   }));
   view.querySelectorAll('[data-a]').forEach((el) => (el.onclick = () => runAction(el.dataset.a)));
 
@@ -430,6 +461,15 @@ async function storageHtml() {
   return `<div style="padding:10px 0;border-bottom:1px solid var(--line)"><div>Spazio occupato</div>
     ${rows.map(([k, v]) => `<div class="row" style="padding:6px 0"><div class="grow mut">${k}</div><b>${v}</b></div>`).join('')}
     <div class="hint">I dati estratti pesano pochissimo (circa 1 KB a documento): lo spazio è quasi tutto nei PDF.</div></div>`;
+}
+
+/** Testo della ricerca Gmail risultante dai filtri (anche non ancora salvati). */
+async function previewQuery(senders, keywords) {
+  return buildGmailQuery({
+    senders: senders ?? await getSetting('gmail.senders'),
+    keywords: keywords ?? await getSetting('gmail.keywords'),
+    generic: await getSetting('gmail.generic'),
+  });
 }
 
 function download(name, text, type) {

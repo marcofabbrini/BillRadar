@@ -6,6 +6,7 @@ import { addBill, billExists, getKV, setKV } from './db.js';
 import { pdfToText } from './pdf.js';
 import { parseBill } from './parser.js';
 import { loadCategories } from './categories.js';
+import { buildGmailQuery } from './query.js';
 
 const SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
 // drive.file: l'app vede solo i file e le cartelle che crea lei (permesso non sensibile)
@@ -177,7 +178,11 @@ const header = (msg, name) => (msg.payload.headers.find((h) => h.name.toLowerCas
  */
 export async function sync(onProgress = () => {}, hooks = {}, opts = {}) {
   const startedAt = Date.now();
-  const base = await getSetting('gmail.query');
+  const base = buildGmailQuery({
+    senders: await getSetting('gmail.senders'),
+    keywords: await getSetting('gmail.keywords'),
+    generic: await getSetting('gmail.generic'),
+  });
   const months = Number(await getSetting('gmail.months'));
   const keepPdf = await getSetting('parse.keepPdf');
   let q;

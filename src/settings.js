@@ -4,13 +4,17 @@
 //
 // type: 'text' | 'number' | 'toggle' | 'select' | 'action' | 'info'
 import { getKV, setKV } from './db.js';
+import { DEFAULT_SENDERS } from './query.js';
 
 export const SETTINGS_SCHEMA = [
   {
     id: 'gmail', title: 'Gmail', icon: '✉️',
     items: [
       { key: 'gmail.clientId', type: 'text', label: 'Google OAuth Client ID', hint: 'Client "Android" creato in Google Cloud Console (vedi README)', default: '' },
-      { key: 'gmail.query', type: 'text', label: 'Filtro di ricerca', hint: 'Sintassi Gmail. Modificalo per aggiungere mittenti.', default: 'has:attachment filename:pdf (bolletta OR fattura OR "tassa automobilistica" OR GSE OR acconto OR bollo)' },
+      { key: 'gmail.senders', type: 'list', label: 'Indirizzi da cui arrivano le bollette', hint: 'Indirizzo completo o intero dominio (es. @enel.com). Solo le mail con PDF da questi mittenti vengono analizzate.', placeholder: 'es. fatture@fornitore.it', default: DEFAULT_SENDERS },
+      { key: 'gmail.keywords', type: 'list', label: 'Testo contenuto nella mail', hint: 'Facoltativo: la mail deve contenere almeno uno di questi testi (oggetto o corpo). Vuoto = nessun vincolo.', placeholder: 'es. la tua fattura', default: [] },
+      { key: 'gmail.generic', type: 'toggle', label: 'Cerca anche per parole generiche', hint: 'Aggiunge le mail con "bolletta", "fattura", "GSE", "bollo"… di qualsiasi mittente.', default: false },
+      { key: 'gmail.preview', type: 'preview', label: 'Ricerca effettuata' },
       { key: 'gmail.months', type: 'select', label: 'Periodo dello storico', hint: 'Usato da "Sincronizza storico"', options: [['3', 'Ultimi 3 mesi'], ['12', 'Ultimo anno'], ['36', 'Ultimi 3 anni'], ['0', 'Tutto']], default: '12' },
       { key: 'gmail.auto', type: 'toggle', label: 'Controlla nuove bollette all\'apertura', hint: 'Guarda solo le mail degli ultimi 7 giorni', default: true },
       { key: 'action.syncHistory', type: 'action', label: 'Sincronizza storico', hint: 'Cerca le bollette più vecchie nel periodo scelto qui sopra (più lento).' },
