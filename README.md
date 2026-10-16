@@ -40,6 +40,24 @@ Il collegamento resta attivo da solo (l'app rinnova il token a ogni apertura), *
 
 Se la lasci in *Test*, Google fa scadere il collegamento dopo 7 giorni. Se capita (o se revochi l'accesso), la Home mostra il pulsante **Riconnetti Gmail**: un tocco e riparte, senza perdere i dati.
 
+## Archivio su Google Drive (facoltativo)
+
+In **Impostazioni → Google Drive** attivi "Archivia su Google Drive": ogni PDF viene copiato nel tuo Drive, a partire dalla root, in
+
+```
+BillRadar / Anno / MM - Mese / Tipologia / data Tipologia Fornitore importo.pdf
+```
+
+Esempio: `BillRadar/2026/03 - Marzo/Luce/2026-03-12 Luce Enel Energia 98,45 EUR.pdf`.
+
+Per attivarlo:
+1. Google Cloud → **API e servizi → Libreria** → abilita **Google Drive API**.
+2. (Facoltativo) **Accesso ai dati → Aggiungi ambiti**: `.../auth/drive.file`.
+3. Attiva l'interruttore nell'app: Google chiede il consenso solo in quel momento. Il permesso `drive.file` è non sensibile e l'app vede solo ciò che crea lei.
+4. "Archivia ora" carica i documenti già presenti; nel dettaglio di ogni bolletta c'è "Salva su Drive".
+
+Nota: con `drive.file` l'app non riusa una cartella "BillRadar" creata a mano; ne crea una propria.
+
 ## Limiti noti
 
 - I PDF scansionati come immagine (senza testo) non vengono letti: finiscono tra i "da verificare" o vengono saltati. Non c'è OCR.

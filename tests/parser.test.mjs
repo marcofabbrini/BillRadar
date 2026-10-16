@@ -98,4 +98,14 @@ t('testo non riconoscibile va in revisione', () => {
   assert.equal(r.needsReview, true);
 });
 
+t('categoria personalizzata con parole chiave e unità', () => {
+  const cats = {
+    condominio: { label: 'Condominio', unit: 'kg', kind: 'cost', keywords: ['amministratore', 'spese condominiali'] },
+  };
+  const r = parseBill(`Studio Bianchi - Amministratore\nSpese condominiali rata ottobre\nConsumo 12 kg\nTotale da pagare € 215,00`, { cats });
+  assert.equal(r.category, 'condominio');
+  assert.equal(r.amount, 215);
+  assert.equal(r.consumption, 12);
+});
+
 console.log(`\n${passed} test superati`);

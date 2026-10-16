@@ -1,19 +1,17 @@
-import '@fontsource/montserrat/latin-500.css';
-import '@fontsource/montserrat/latin-600.css';
-import '@fontsource/montserrat/latin-700.css';
 import './style.css';
-import { CATEGORIES } from './parser.js';
-import { db, listBills, addBill, updateBill, deleteBill, exportAll, importAll, wipeAll, billsToCSV, getKV } from './db.js';
+import { cats, loadCategories, addCategory, removeCategory } from './categories.js';
+import { db, listBills, addBill, updateBill, deleteBill, exportAll, importAll, wipeAll, billsToCSV, getKV, setKV } from './db.js';
 import { SETTINGS_SCHEMA, getSetting, setSetting, allSettings } from './settings.js';
 import { eur, num, MONTH_LABELS, years, monthlyByCategory, totals, consumption, yoy, upcoming } from './stats.js';
 import * as gmail from './gmail.js';
+import * as drive from './drive.js';
 import { renderPdf } from './pdf.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const view = $('#view');
-const state = { year: new Date().getFullYear(), filter: 'all', q: '', statCat: 'luce' };
+const state = { year: new Date().getFullYear(), filter: 'all', q: '', statCat: 'luce', hidden: new Set(), openSet: new Set() };
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const cat = (id) => CATEGORIES[id] || { label: 'Altro', icon: '📄', color: '#888', kind: 'cost', unit: '' };
+const cat = (id) => cats()[id] || { label: 'Altro', icon: '📄', color: '#888', kind: 'cost', unit: '' };
 const fmtDate = (d) => (d ? d.split('-').reverse().join('/') : '—');
 
 function emptyState(title, text) {
@@ -42,24 +40,97 @@ function toast(msg, ms = 3200) {
 }
 
 // ---------- grafici SVG ----------
-function stackedBars(byCat, ids) {
-  const W = 340, H = 170, pad = 22, bw = (W - pad) / 12;
-  const totalsM = Array.from({ length: 12 }, (_, m) => ids.reduce((s, id) => s + (byCat[id]?.[m] || 0), 0));
-  const max = Math.max(1, ...totalsM);
-  let g = '';
-  for (let m = 0; m < 12; m++) {
-    let y = H - 18;
-    for (const id of ids) {
-      const v = byCat[id]?.[m] || 0; if (!v) continue;
-      const h = (v / max) * (H - 36);
-      y -= h;
-      g += `<rect class="bar" style="--m:${m}" x="${pad + m * bw + 3}" y="${y}" width="${bw - 6}" height="${h}" rx="3" fill="${cat(id).color}"/>`;
-    }
-    g += `<text x="${pad + m * bw + bw / 2}" y="${H - 5}" text-anchor="middle">${MONTH_LABELS[m][0]}</text>`;
+const CH = { W: 340, H: 200, L: 42, R: 12, T: 14, B: 24 };
+let chartCtx = null;
+
+/** Curva cubica monotona (Fritsch–Carlson): morbida e senza sovra-oscillazioni. */
+function smoothPath(pts) {
+  const n = pts.length;
+  if (n < 2) return '';
+  const dx = [], m = [];
+  for (let i = 0; i < n - 1; i++) { dx[i] = pts[i + 1][0] - pts[i][0]; m[i] = (pts[i + 1][1] - pts[i][1]) / dx[i]; }
+  const t = [m[0]];
+  for (let i = 1; i < n - 1; i++) t[i] = m[i - 1] * m[i] <= 0 ? 0 : (m[i - 1] + m[i]) / 2;
+  t[n - 1] = m[n - 2];
+  for (let i = 0; i < n - 1; i++) {
+    if (m[i] === 0) { t[i] = 0; t[i + 1] = 0; continue; }
+    const a = t[i] / m[i], b = t[i + 1] / m[i], q = a * a + b * b;
+    if (q > 9) { const k = 3 / Math.sqrt(q); t[i] = k * a * m[i]; t[i + 1] = k * b * m[i]; }
   }
-  g += `<text x="0" y="12">${eur(max).replace(',00', '')}</text>`;
-  return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Spesa mensile">${g}</svg>`;
+  const f = (v) => v.toFixed(1);
+  let d = `M${f(pts[0][0])},${f(pts[0][1])}`;
+  for (let i = 0; i < n - 1; i++) {
+    const h = dx[i] / 3;
+    d += `C${f(pts[i][0] + h)},${f(pts[i][1] + t[i] * h)} ${f(pts[i + 1][0] - h)},${f(pts[i + 1][1] - t[i + 1] * h)} ${f(pts[i + 1][0])},${f(pts[i + 1][1])}`;
+  }
+  return d;
 }
+function niceMax(v) {
+  const e = Math.pow(10, Math.floor(Math.log10(v))), f = v / e;
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * e;
+}
+const chartX = (m) => CH.L + ((CH.W - CH.L - CH.R) * m) / 11;
+
+function lineChart(byCat, vis) {
+  const { W, H, L, R, T, B } = CH;
+  const max = niceMax(Math.max(1, ...vis.flatMap((id) => byCat[id] || [])));
+  const y = (v) => T + (H - T - B) * (1 - v / max);
+  let g = '';
+  for (let i = 0; i <= 4; i++) {
+    const v = (max * i) / 4, yy = y(v);
+    g += `<line x1="${L}" x2="${W - R}" y1="${yy}" y2="${yy}" stroke="var(--line)" stroke-dasharray="${i ? '3 4' : ''}"/>`;
+    g += `<text x="${L - 6}" y="${yy + 3}" text-anchor="end">${num(v)}€</text>`;
+  }
+  for (let m = 0; m < 12; m++) g += `<text x="${chartX(m)}" y="${H - 7}" text-anchor="middle">${MONTH_LABELS[m]}</text>`;
+  if (!vis.length) g += `<text x="${W / 2}" y="${H / 2 - 4}" text-anchor="middle" style="font-size:12px">Tocca la legenda per mostrare le serie</text>`;
+  vis.forEach((id, k) => {
+    const c = cat(id).color;
+    const pts = (byCat[id] || []).map((v, m) => (v > 0 ? [chartX(m), y(v)] : null)).filter(Boolean);
+    if (pts.length >= 2) g += `<path class="ln" pathLength="1" d="${smoothPath(pts)}" stroke="${c}" style="color:${c};--d:${k * 90}ms"/>`;
+    pts.forEach(([px, py]) => { g += `<circle class="pt" cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="3.4" fill="${c}" style="--d:${k * 90 + 700}ms"/>`; });
+  });
+  g += `<line class="guide" y1="${T}" y2="${H - B}" stroke="var(--acc)" stroke-width="1" visibility="hidden"/>`;
+  g += `<rect class="hit" x="${L}" y="0" width="${W - L}" height="${H}" fill="transparent"/>`;
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Spesa mensile per categoria">${g}</svg>`;
+}
+
+/** Disegna grafico + legenda cliccabile (tocca una voce per nascondere/mostrare la serie). */
+function paintChart() {
+  const box = $('#chartBox');
+  if (!box || !chartCtx) return;
+  const { byCat, ids, hasData } = chartCtx;
+  if (!hasData) { box.innerHTML = emptyState('Nessun dato ancora', 'Collega Gmail e tocca ⟳ per cercare le bollette.'); return; }
+  const vis = ids.filter((id) => !state.hidden.has(id));
+  box.innerHTML = `<div class="chartwrap">${lineChart(byCat, vis)}<div class="tip" hidden></div></div>
+    <div class="legend">${ids.map((id) => `<button class="lg ${state.hidden.has(id) ? 'off' : ''}" data-id="${id}" aria-pressed="${!state.hidden.has(id)}"><i style="background:${cat(id).color};color:${cat(id).color}"></i>${esc(cat(id).label)}</button>`).join('')}${state.hidden.size ? '<button class="lg all" data-all>Mostra tutte</button>' : ''}</div>`;
+
+  box.querySelectorAll('.lg').forEach((b) => (b.onclick = async () => {
+    if (b.dataset.all !== undefined) state.hidden.clear();
+    else if (state.hidden.has(b.dataset.id)) state.hidden.delete(b.dataset.id); else state.hidden.add(b.dataset.id);
+    await setKV('ui.hiddenSeries', [...state.hidden]);
+    paintChart();
+  }));
+
+  // tooltip al tocco / passaggio del mouse
+  const svg = box.querySelector('svg'), tip = box.querySelector('.tip'), guide = svg.querySelector('.guide');
+  const hide = () => { tip.hidden = true; guide.setAttribute('visibility', 'hidden'); };
+  const show = (e) => {
+    const r = svg.getBoundingClientRect();
+    const px = ((e.clientX - r.left) / r.width) * CH.W;
+    const m = Math.max(0, Math.min(11, Math.round((px - CH.L) / ((CH.W - CH.L - CH.R) / 11))));
+    const rows = vis.filter((id) => (byCat[id]?.[m] || 0) > 0);
+    if (!rows.length) return hide();
+    const gx = chartX(m);
+    guide.setAttribute('x1', gx); guide.setAttribute('x2', gx); guide.setAttribute('visibility', 'visible');
+    tip.innerHTML = `<b>${MONTH_LABELS[m]} ${state.year}</b>${rows.map((id) => `<span><i style="background:${cat(id).color}"></i>${esc(cat(id).label)}<em>${eur(byCat[id][m])}</em></span>`).join('')}`;
+    tip.hidden = false;
+    tip.style.left = `${Math.max(80, Math.min(r.width - 80, (gx / CH.W) * r.width))}px`;
+  };
+  svg.addEventListener('pointerdown', show);
+  svg.addEventListener('pointermove', (e) => { if (e.pointerType === 'mouse' || e.buttons) show(e); });
+  svg.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse') hide(); });
+}
+
 function simpleBars(vals, color) {
   const W = 340, H = 150, pad = 4, bw = (W - pad) / 12, max = Math.max(1, ...vals);
   let g = '';
@@ -72,8 +143,9 @@ function simpleBars(vals, color) {
 }
 
 async function enabledCats() {
-  const s = await allSettings();
-  return Object.keys(CATEGORIES).filter((id) => s[`cat.${id}`] !== false);
+  const out = [];
+  for (const id of Object.keys(cats())) if ((await getSetting(`cat.${id}`)) !== false) out.push(id);
+  return out;
 }
 
 // ---------- Home ----------
@@ -98,9 +170,8 @@ async function renderHome() {
         <small>Saldo <span class="${t.saldo >= 0 ? 'pos' : 'neg'}">${eur(t.saldo)}</span></small></div>
     </div>
     ${review ? `<div class="card enter" style="--i:2"><b>${review}</b> document${review > 1 ? 'i' : 'o'} da verificare <a href="#/docs" data-filter="review" style="float:right">Apri →</a></div>` : ''}
-    <div class="card enter" style="--i:2"><h3>Spesa mensile</h3>${bills.length ? stackedBars(byCat, ids) : emptyState('Nessun dato ancora', 'Collega Gmail e tocca ⟳ per cercare le bollette.')}
-      <div class="legend">${ids.map((id) => `<span><i style="background:${cat(id).color}"></i>${cat(id).label}</span>`).join('')}</div></div>
-    <div class="card enter" style="--i:3"><h3>Per categoria</h3>${ids.map((id) => {
+    <div class="card enter" style="--i:2"><h3>Spesa mensile</h3><div id="chartBox"></div></div>
+    <div class="card enter" style="--i:3"><h3>Per categoria</h3>${[...ids, ...(t.perCategoria.altro ? ['altro'] : [])].map((id) => {
       const v = t.perCategoria[id] || 0;
       return `<div class="row"><div class="ico" style="background:${cat(id).color}22">${cat(id).icon}</div><div class="grow"><div class="t">${cat(id).label}</div></div><b class="${cat(id).kind === 'income' ? 'pos' : ''}" data-count="${v}">${eur(v)}</b></div>`;
     }).join('')}</div>
@@ -108,6 +179,8 @@ async function renderHome() {
   $('#yr').onchange = (e) => { state.year = Number(e.target.value); renderHome(); };
   if (reauth) $('#reauth').onclick = () => runAction('action.connect');
   view.querySelectorAll('.row[data-id]').forEach((r) => (r.onclick = () => openBill(Number(r.dataset.id))));
+  chartCtx = { byCat, ids, hasData: bills.length > 0 };
+  paintChart();
   animateCounts();
 }
 
@@ -143,22 +216,32 @@ async function renderDocs() {
 async function openBill(id) {
   const b = id ? await db.bills.get(id) : { category: 'luce', issueDate: new Date().toISOString().slice(0, 10), source: 'manuale' };
   const dlg = $('#dlg');
+  const canDrive = !!(id && b.pdf && !b.driveFileId && (await drive.isDriveEnabled()));
   const field = (k, label, type = 'text') => `<label>${label}</label><input type="${type}" data-k="${k}" ${type === 'number' ? 'step="0.01"' : ''} value="${esc(b[k] ?? '')}">`;
   dlg.innerHTML = `
     <h2 style="margin:0 0 4px">${id ? 'Dettaglio documento' : 'Nuovo documento'}</h2>
-    <label>Categoria</label><select data-k="category">${Object.entries(CATEGORIES).map(([k, c]) => `<option value="${k}" ${b.category === k ? 'selected' : ''}>${c.icon} ${c.label}</option>`).join('')}</select>
+    <label>Categoria</label><select data-k="category">${Object.entries(cats()).map(([k, c]) => `<option value="${k}" ${b.category === k ? 'selected' : ''}>${c.icon} ${c.label}</option>`).join('')}</select>
     ${field('supplier', 'Fornitore')}${field('amount', 'Importo (€)', 'number')}${field('consumption', 'Consumo', 'number')}
     ${field('issueDate', 'Data documento', 'date')}${field('periodFrom', 'Periodo da', 'date')}${field('periodTo', 'Periodo a', 'date')}
     ${field('dueDate', 'Scadenza', 'date')}${field('invoiceNumber', 'Numero documento')}
     <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" data-k="paid" ${b.paid ? 'checked' : ''}> Pagata</label>
+    ${b.driveFileId ? `<div class="hint" style="margin-top:10px">☁️ Archiviato su Drive: ${esc(b.drivePath || 'BillRadar')}</div>` : ''}
     <div id="pdfbox" style="margin-top:10px"></div>
     <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
       <button class="btn" id="save">Salva</button>
       ${b.pdf ? '<button class="btn sec" id="pdfBtn">Vedi PDF</button>' : ''}
+      ${canDrive ? '<button class="btn sec" id="driveBtn">☁️ Salva su Drive</button>' : ''}
       ${id ? '<button class="btn danger" id="del">Elimina</button>' : ''}
       <button class="btn sec" id="close">Chiudi</button></div>`;
   dlg.showModal();
   $('#close', dlg).onclick = () => dlg.close();
+  if (canDrive) $('#driveBtn', dlg).onclick = async () => {
+    try {
+      const { fileId, path } = await drive.archiveBill(b, b.pdf);
+      await updateBill(id, { driveFileId: fileId, drivePath: path });
+      dlg.close(); toast(`Salvato su Drive: ${path}`); route();
+    } catch (e) { toast(e.message, 7000); }
+  };
   if (b.pdf) $('#pdfBtn', dlg).onclick = async () => renderPdf(await b.pdf.arrayBuffer(), $('#pdfbox', dlg));
   if (id) $('#del', dlg).onclick = async () => { if (confirm('Eliminare questo documento?')) { await deleteBill(id); dlg.close(); route(); } };
   $('#save', dlg).onclick = async () => {
@@ -208,8 +291,9 @@ async function renderSettings() {
   const connected = await gmail.isConnected();
   const last = await getKV('gmail.lastSync');
   let html = '', gi = 0;
+  const catHtml = await catSettingsHtml();
   for (const sec of SETTINGS_SCHEMA) {
-    html += `<div class="set-group enter" style="--i:${gi++}"><h2>${sec.icon} ${sec.title}</h2><div class="card" style="padding:4px 14px">`;
+    html += `<details class="set-group enter" data-sec="${sec.id}" ${state.openSet.has(sec.id) ? 'open' : ''} style="--i:${gi++}"><summary><span>${sec.icon} ${sec.title}</span><i class="chev"></i></summary><div class="card" style="padding:4px 14px">`;
     for (const it of sec.items) {
       const v = await getSetting(it.key);
       const hint = it.hint ? `<div class="hint">${esc(it.hint)}</div>` : '';
@@ -218,19 +302,83 @@ async function renderSettings() {
       else if (it.type === 'select') html += `<div class="set-item"><div>${it.label}</div><select data-s="${it.key}" style="width:auto">${it.options.map(([k, l]) => `<option value="${k}" ${String(v) === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>`;
       else if (it.type === 'action') {
         const label = it.key === 'action.connect' ? (connected ? 'Scollega Gmail' : (await gmail.needsReauth()) ? 'Riconnetti Gmail' : 'Collega Gmail') : it.label;
-        html += `<div class="set-item"><div>${it.label}${it.key === 'action.connect' ? `<div class="hint">${connected ? 'Collegato' : 'Non collegato'}${last ? ' · ultimo sync ' + new Date(last).toLocaleString('it-IT') : ''}</div>` : ''}</div><button class="btn ${it.danger ? 'danger' : 'sec'}" data-a="${it.key}">${it.key === 'action.connect' ? label : 'Esegui'}</button></div>`;
-      } else html += `<div class="set-item mut">${it.label}</div>`;
+        html += `<div class="set-item"><div>${it.label}${it.key === 'action.connect' ? `<div class="hint">${connected ? 'Collegato' : 'Non collegato'}${last ? ' · ultimo sync ' + new Date(last).toLocaleString('it-IT') : ''}</div>` : hint}</div><button class="btn ${it.danger ? 'danger' : 'sec'}" data-a="${it.key}">${it.key === 'action.connect' ? label : 'Esegui'}</button></div>`;
+      } else if (it.type === 'categories') html += catHtml;
+      else html += `<div class="set-item mut">${it.label}</div>`;
     }
-    html += '</div></div>';
+    html += '</div></details>';
   }
   view.innerHTML = html + '<p class="mut" style="text-align:center">BillRadar 0.1 · dati salvati solo su questo dispositivo</p>';
 
   view.querySelectorAll('[data-s]').forEach((el) => (el.onchange = async () => {
     const val = el.type === 'checkbox' ? el.checked : el.value;
+    if (el.dataset.s === 'drive.enabled' && val) {
+      // il permesso Drive si chiede solo ora, solo se serve
+      try {
+        if (!(await gmail.hasDriveScope())) { await gmail.connect({ drive: true }); toast('Accesso a Drive concesso'); }
+      } catch (e) { el.checked = false; await setSetting('drive.enabled', false); toast(e.message, 6000); return; }
+      await setSetting('drive.enabled', true);
+      await renderSettings();
+      if (confirm('Archivio su Drive attivo. Vuoi caricare ora anche i documenti già presenti?')) runAction('action.driveSync');
+      return;
+    }
     await setSetting(el.dataset.s, val);
     if (el.dataset.s === 'ui.theme') applyTheme(val);
   }));
   view.querySelectorAll('[data-a]').forEach((el) => (el.onclick = () => runAction(el.dataset.a)));
+
+  // sezioni collassabili: chiuse di default, lo stato aperto resta durante i ricaricamenti
+  view.querySelectorAll('details.set-group').forEach((d) => d.addEventListener('toggle', () => {
+    if (d.open) state.openSet.add(d.dataset.sec); else state.openSet.delete(d.dataset.sec);
+  }));
+  // categorie: abilita/disabilita, elimina (solo personalizzate), aggiungi
+  view.querySelectorAll('[data-catset]').forEach((el) => (el.onchange = () => setSetting(`cat.${el.dataset.catset}`, el.checked)));
+  view.querySelectorAll('[data-delcat]').forEach((el) => (el.onclick = async () => {
+    const id = el.dataset.delcat;
+    if (!confirm(`Eliminare la categoria "${cat(id).label}"? I documenti già archiviati passeranno ad "Altro".`)) return;
+    await removeCategory(id); state.hidden.delete(id); toast('Categoria eliminata'); renderSettings();
+  }));
+  const addBtn = $('#addCat'); if (addBtn) addBtn.onclick = openCategoryDialog;
+}
+
+async function catSettingsHtml() {
+  let h = '';
+  for (const [id, c] of Object.entries(cats())) {
+    const on = (await getSetting(`cat.${id}`)) !== false;
+    h += `<div class="set-item"><div class="catline"><span class="catdot" style="background:${c.color}"></span><div><div>${c.icon} ${esc(c.label)}${c.custom ? ' <span class="tag2">tua</span>' : ''}</div><div class="hint">${c.kind === 'income' ? 'Entrata' : 'Spesa'}${c.unit ? ` · ${esc(c.unit)}` : ''}</div></div></div>
+      <div class="acts">${c.custom ? `<button class="icon-btn" data-delcat="${id}" aria-label="Elimina ${esc(c.label)}">🗑</button>` : ''}<label class="switch"><input type="checkbox" data-catset="${id}" ${on ? 'checked' : ''}><span></span></label></div></div>`;
+  }
+  return h + '<div style="padding:12px 0"><button class="btn sec" id="addCat" style="width:100%">+ Aggiungi categoria</button></div>';
+}
+
+function openCategoryDialog() {
+  const dlg = $('#dlg');
+  const icons = ['🏠', '🛒', '🏥', '🎓', '🐶', '📺', '✈️', '💼', '🔌', '🚌', '🎁', '📌'];
+  dlg.innerHTML = `
+    <h2 style="margin:0 0 4px">Nuova categoria</h2>
+    <label>Nome</label><input type="text" id="nc-name" maxlength="28" placeholder="es. Condominio" autocomplete="off">
+    <label>Icona</label>
+    <div class="chips" id="nc-icons">${icons.map((i) => `<button type="button" class="chip" data-i="${i}">${i}</button>`).join('')}</div>
+    <input type="text" id="nc-icon" maxlength="4" value="📌" style="width:90px">
+    <label>Colore</label><input type="color" id="nc-color" value="#35c8ff">
+    <label>Tipo</label><select id="nc-kind"><option value="cost">Spesa</option><option value="income">Entrata</option></select>
+    <label>Unità di misura (facoltativa)</label><input type="text" id="nc-unit" maxlength="8" placeholder="es. kWh, L, kg">
+    <label>Parole chiave per riconoscerla (facoltative)</label>
+    <input type="text" id="nc-kw" placeholder="es. condominio, amministratore" autocomplete="off">
+    <div class="hint" style="margin-top:6px">Con le parole chiave le nuove bollette trovate in Gmail finiscono qui da sole. Senza, puoi assegnarla a mano dal dettaglio di ogni documento.</div>
+    <div style="display:flex;gap:8px;margin-top:16px"><button class="btn" id="nc-save">Aggiungi</button><button class="btn sec" id="nc-cancel">Annulla</button></div>`;
+  dlg.showModal();
+  dlg.querySelectorAll('#nc-icons .chip').forEach((c) => (c.onclick = () => { $('#nc-icon', dlg).value = c.dataset.i; }));
+  $('#nc-cancel', dlg).onclick = () => dlg.close();
+  $('#nc-save', dlg).onclick = async () => {
+    try {
+      await addCategory({
+        label: $('#nc-name', dlg).value, icon: $('#nc-icon', dlg).value, color: $('#nc-color', dlg).value,
+        kind: $('#nc-kind', dlg).value, unit: $('#nc-unit', dlg).value, keywords: $('#nc-kw', dlg).value,
+      });
+      dlg.close(); toast('Categoria aggiunta'); renderSettings();
+    } catch (e) { toast(e.message, 4500); }
+  };
 }
 
 function download(name, text, type) {
@@ -245,6 +393,13 @@ async function runAction(key) {
       if (await gmail.isConnected()) { await gmail.disconnect(); toast('Gmail scollegato'); }
       else { await gmail.connect(); toast('Gmail collegato'); await doSync(); }
       renderSettings();
+    } else if (key === 'action.driveSync') {
+      if (!(await drive.isDriveEnabled())) { toast('Attiva prima "Archivia su Google Drive"'); return; }
+      const bar = $('#progress'); bar.hidden = false;
+      try {
+        const r = await drive.archivePending((i, n) => { $('div', bar).style.width = `${(i / n) * 100}%`; $('span', bar).textContent = `Carico su Drive ${i}/${n}`; });
+        toast(r.total === 0 ? 'Nessun documento da archiviare' : `Su Drive: ${r.done} caricati${r.errors ? `, ${r.errors} errori. ${r.firstError}` : ''}`, r.errors ? 8000 : 4500);
+      } finally { bar.hidden = true; }
     } else if (key === 'action.exportJson') download(`billradar-${Date.now()}.json`, JSON.stringify(await exportAll(), null, 2), 'application/json');
     else if (key === 'action.exportCsv') download(`billradar-${Date.now()}.csv`, billsToCSV(await listBills()), 'text/csv');
     else if (key === 'action.import') {
@@ -264,8 +419,10 @@ async function doSync() {
     if (!(await gmail.isConnected())) { toast('Collega prima Gmail in Impostazioni'); location.hash = '#/settings'; return; }
     bar.hidden = false;
     $('#syncBtn').classList.add('busy');
-    const r = await gmail.sync((i, n) => { $('div', bar).style.width = `${(i / n) * 100}%`; $('span', bar).textContent = `Analizzo ${i}/${n}`; });
-    toast(`Sincronizzato: ${r.added} nuovi, ${r.skipped} già presenti${r.errors ? `, ${r.errors} errori` : ''}`, 5000);
+    const hook = drive.syncHook();
+    const r = await gmail.sync((i, n) => { $('div', bar).style.width = `${(i / n) * 100}%`; $('span', bar).textContent = `Analizzo ${i}/${n}`; }, hook);
+    const onDrive = hook.uploaded ? `, ${hook.uploaded} su Drive` : '';
+    toast(`Sincronizzato: ${r.added} nuovi${onDrive}, ${r.skipped} già presenti${r.errors ? `, ${r.errors} errori` : ''}${hook.errors.length ? `. Drive: ${hook.errors[0]}` : ''}`, hook.errors.length ? 9000 : 5000);
   } catch (e) { toast(e.message, 6000); }
   bar.hidden = true;
   $('#syncBtn').classList.remove('busy');
@@ -313,6 +470,8 @@ window.addEventListener('hashchange', route);
 
 (async () => {
   applyTheme(await getSetting('ui.theme'));
+  await loadCategories();
+  state.hidden = new Set(await getKV('ui.hiddenSeries', []));
   const t0 = performance.now();
   await route();
   const calm = matchMedia('(prefers-reduced-motion: reduce)').matches;

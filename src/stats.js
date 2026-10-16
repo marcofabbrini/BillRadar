@@ -1,4 +1,4 @@
-import { CATEGORIES } from './parser.js';
+import { cats } from './categories.js';
 
 export const eur = (v) => (v == null ? '—' : new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(v));
 export const num = (v, d = 0) => (v == null ? '—' : new Intl.NumberFormat('it-IT', { maximumFractionDigits: d }).format(v));
@@ -15,7 +15,7 @@ export function years(bills) {
 /** Totali mensili per categoria in un anno: { luce: [12 valori], ... } */
 export function monthlyByCategory(bills, year) {
   const out = {};
-  for (const id of Object.keys(CATEGORIES)) out[id] = Array(12).fill(0);
+  for (const id of [...Object.keys(cats()), 'altro']) out[id] = Array(12).fill(0);
   for (const b of bills) {
     if (yearOf(b) !== year || !out[b.category] || b.amount == null) continue;
     out[b.category][monthOf(b)] += b.amount;
@@ -27,8 +27,7 @@ export function totals(bills, year) {
   const t = { spese: 0, entrate: 0, perCategoria: {} };
   for (const b of bills) {
     if (yearOf(b) !== year || b.amount == null) continue;
-    const c = CATEGORIES[b.category];
-    if (!c) continue;
+    const c = cats()[b.category] || { kind: 'cost' };   // "altro" conta come spesa
     t.perCategoria[b.category] = (t.perCategoria[b.category] || 0) + b.amount;
     if (c.kind === 'income') t.entrate += b.amount; else t.spese += b.amount;
   }
@@ -56,6 +55,6 @@ export function upcoming(bills, days = 30) {
   const today = new Date().toISOString().slice(0, 10);
   const limit = new Date(Date.now() + days * 864e5).toISOString().slice(0, 10);
   return bills
-    .filter((b) => b.dueDate && b.dueDate >= today && b.dueDate <= limit && !b.paid && CATEGORIES[b.category]?.kind !== 'income')
+    .filter((b) => b.dueDate && b.dueDate >= today && b.dueDate <= limit && !b.paid && cats()[b.category]?.kind !== 'income')
     .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
 }

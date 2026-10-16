@@ -137,10 +137,15 @@ export function extractInvoiceNumber(text) {
   return m ? m[1] : null;
 }
 
-export function extractConsumption(text, category) {
+export function extractConsumption(text, category, cats = CATEGORIES) {
   const t = norm(text);
-  const unit = { luce: 'kwh', gas: 'smc', acqua: '(?:m³|m3|mc|metri cubi)', gse: 'kwh' }[category];
-  if (!unit) return null;
+  let unit = { luce: 'kwh', gas: 'smc', acqua: '(?:m³|m3|mc|metri cubi)', gse: 'kwh' }[category];
+  if (!unit) {
+    // categoria personalizzata con unità di misura propria (es. litri, kg)
+    const u = cats[category]?.unit;
+    if (!u) return null;
+    unit = u.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
   const labelled = new RegExp(`(?:consumo|consumi|energia|quantit[aà]|fatturato|immessa|totale)[^\\d\\n]{0,40}${NUM}\\s*${unit}`, 'i');
   let m = t.match(labelled);
   if (!m) m = t.match(new RegExp(`${NUM}\\s*${unit}`, 'i'));
@@ -165,7 +170,7 @@ export function parseBill(text, { subject = '', from = '', cats = CATEGORIES } =
   const period = extractPeriod(clean);
   const due = extractDue(clean);
   const issue = extractIssueDate(clean) || period.to;
-  const consumption = extractConsumption(clean, category);
+  const consumption = extractConsumption(clean, category, cats);
   const supplier = extractSupplier(`${from}\n${clean}`);
   const invoiceNumber = extractInvoiceNumber(clean);
 

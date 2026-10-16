@@ -4,9 +4,12 @@ import { App as CapApp } from '@capacitor/app';
 import { getSetting } from './settings.js';
 import { addBill, billExists, getKV, setKV } from './db.js';
 import { pdfToText } from './pdf.js';
-import { parseBill, CATEGORIES } from './parser.js';
+import { parseBill } from './parser.js';
+import { loadCategories } from './categories.js';
 
 const SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
+// drive.file: l'app vede solo i file e le cartelle che crea lei (permesso non sensibile)
+const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 export const REDIRECT_URI = 'com.marcofabbrini.billradar:/oauth2redirect';
 const API = 'https://gmail.googleapis.com/gmail/v1/users/me';
 
@@ -23,7 +26,13 @@ async function saveTokens(t) {
     access: t.access_token,
     refresh: t.refresh_token || prev.refresh,
     expires: Date.now() + (t.expires_in - 60) * 1000,
+    scope: t.scope || prev.scope || '',
   });
+}
+
+export async function hasDriveScope() {
+  const t = await getKV('gmail.tokens');
+  return !!(t && (t.scope || '').includes('auth/drive.file'));
 }
 
 export async function isConnected() {
@@ -53,7 +62,9 @@ async function tokenRequest(params) {
 }
 
 /** Avvia il login Google nel browser di sistema e attende il redirect. */
-export async function connect() {
+export async function connect(opts = {}) {
+  // il permesso Drive viene chiesto solo se l'archivio su Drive è attivo (o richiesto ora)
+  const wantDrive = opts.drive ?? !!(await getSetting('drive.enabled'));
   const clientId = (await getSetting('gmail.clientId')).trim();
   if (!clientId) throw new Error('Inserisci prima il Client ID in Impostazioni → Gmail');
   if (!Capacitor.isNativePlatform()) throw new Error('Il collegamento Gmail funziona solo nell\'app Android (APK).');
@@ -62,7 +73,7 @@ export async function connect() {
   const state = rand(16);
   const url = 'https://accounts.google.com/o/oauth2/v2/auth?' + new URLSearchParams({
     client_id: clientId, redirect_uri: REDIRECT_URI, response_type: 'code',
-    scope: SCOPE, code_challenge: await challenge(verifier), code_challenge_method: 'S256',
+    scope: wantDrive ? `${SCOPE} ${DRIVE_SCOPE}` : SCOPE, include_granted_scopes: 'true', code_challenge: await challenge(verifier), code_challenge_method: 'S256',
     state, access_type: 'offline', prompt: 'consent',
   });
 
@@ -91,7 +102,7 @@ export async function keepAlive() {
   try { await accessToken(); } catch { /* il banner "Riconnetti" gestisce il caso */ }
 }
 
-async function accessToken() {
+export async function accessToken() {
   const t = await getKV('gmail.tokens');
   if (!t) throw new Error('Account Gmail non collegato');
   if (t.access && t.expires > Date.now()) return t.access;
@@ -111,26 +122,28 @@ async function accessToken() {
   }
 }
 
-/** Traduce gli errori della Gmail API in indicazioni chiare. */
-async function gmailError(r) {
+/** Traduce gli errori delle API Google (Gmail / Drive) in indicazioni chiare. */
+export async function googleError(r, api = 'Gmail') {
   let reason = '', msg = '';
   try {
     const j = await r.json();
     reason = j.error?.errors?.[0]?.reason || j.error?.status || '';
     msg = j.error?.message || '';
     // il dettaglio completo resta in console per la diagnosi
-    console.error('Gmail API', r.status, JSON.stringify(j.error || j));
+    console.error(`${api} API`, r.status, JSON.stringify(j.error || j));
   } catch { /* corpo non JSON */ }
   const hay = `${reason} ${msg}`.toLowerCase();
   let hint;
   if (hay.includes('accessnotconfigured') || hay.includes('has not been used') || hay.includes('disabled'))
-    hint = 'la Gmail API non è abilitata nel progetto Google Cloud (API e servizi → Libreria → Gmail API → Abilita).';
+    hint = `la ${api} API non è abilitata nel progetto Google Cloud (API e servizi → Libreria → ${api === 'Drive' ? 'Google Drive API' : 'Gmail API'} → Abilita).`;
   else if (hay.includes('insufficient') || hay.includes('scope'))
-    hint = 'manca il permesso di lettura. Scollega Gmail e ricollegalo spuntando la casella "Leggi i messaggi" nella schermata di consenso di Google.';
+    hint = api === 'Drive'
+      ? 'manca il permesso per Drive. Disattiva e riattiva "Archivia su Google Drive" e consenti l\'accesso nella schermata di Google.'
+      : 'manca il permesso di lettura. Scollega Gmail e ricollegalo spuntando la casella "Leggi i messaggi" nella schermata di consenso di Google.';
   else if (hay.includes('ratelimit') || hay.includes('quota'))
     hint = 'troppe richieste, riprova tra qualche minuto.';
   else hint = msg || 'accesso negato da Google.';
-  const e = new Error(`Gmail ${r.status}: ${hint}`);
+  const e = new Error(`${api} ${r.status}: ${hint}`);
   e.status = r.status; e.reason = reason;
   return e;
 }
@@ -138,7 +151,7 @@ async function gmailError(r) {
 async function gget(path, params) {
   const url = `${API}${path}${params ? '?' + new URLSearchParams(params) : ''}`;
   const r = await fetch(url, { headers: { Authorization: `Bearer ${await accessToken()}` } });
-  if (!r.ok) throw await gmailError(r);
+  if (!r.ok) throw await googleError(r, 'Gmail');
   return r.json();
 }
 
@@ -157,7 +170,7 @@ function* walkParts(part) {
 const header = (msg, name) => (msg.payload.headers.find((h) => h.name.toLowerCase() === name) || {}).value || '';
 
 /** Scarica le mail con bollette, estrae i dati dai PDF e li archivia in locale. */
-export async function sync(onProgress = () => {}) {
+export async function sync(onProgress = () => {}, hooks = {}) {
   const base = await getSetting('gmail.query');
   const months = Number(await getSetting('gmail.months'));
   const keepPdf = await getSetting('parse.keepPdf');
@@ -171,6 +184,7 @@ export async function sync(onProgress = () => {}) {
     pageToken = r.nextPageToken;
   } while (pageToken && ids.length < 500);
 
+  const allCats = await loadCategories();
   const stats = { messages: ids.length, added: 0, skipped: 0, errors: 0 };
   for (let i = 0; i < ids.length; i++) {
     onProgress(i + 1, ids.length);
@@ -186,16 +200,19 @@ export async function sync(onProgress = () => {}) {
         const att = await gget(`/messages/${msg.id}/attachments/${p.body.attachmentId}`);
         const bytes = b64urlToBytes(att.data);
         const text = await pdfToText(bytes.slice());
-        const parsed = parseBill(text, { subject, from, cats: CATEGORIES });
+        const parsed = parseBill(text, { subject, from, cats: allCats });
         if (parsed.category === 'altro' && parsed.amount == null) { stats.skipped++; continue; }
         const { scores, ...fields } = parsed;
-        await addBill({
+        const record = {
           ...fields,
           issueDate: fields.issueDate || mailDate,
           messageId: msg.id, attachmentId: p.body.attachmentId,
           fileName: p.filename, subject, from, source: 'gmail',
-        }, keepPdf ? new Blob([bytes], { type: 'application/pdf' }) : null);
+        };
+        const billId = await addBill(record, keepPdf ? new Blob([bytes], { type: 'application/pdf' }) : null);
         stats.added++;
+        // archivio opzionale (es. Google Drive): un errore qui non interrompe la sincronizzazione
+        if (hooks.onBill) await hooks.onBill(billId, bytes, record);
       }
     } catch (e) {
       console.error(e);

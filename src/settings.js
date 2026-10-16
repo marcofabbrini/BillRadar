@@ -17,15 +17,16 @@ export const SETTINGS_SCHEMA = [
     ],
   },
   {
+    id: 'drive', title: 'Google Drive', icon: '☁️',
+    items: [
+      { key: 'drive.enabled', type: 'toggle', label: 'Archivia su Google Drive', hint: 'Facoltativo. Salva i PDF in BillRadar / Anno / Mese / Tipologia nel tuo Drive.', default: false },
+      { key: 'action.driveSync', type: 'action', label: 'Archivia ora i documenti già presenti', hint: 'Carica su Drive le bollette salvate prima di attivare l\'archivio.' },
+    ],
+  },
+  {
     id: 'categories', title: 'Categorie', icon: '🗂️',
     items: [
-      { key: 'cat.luce', type: 'toggle', label: 'Luce', default: true },
-      { key: 'cat.gas', type: 'toggle', label: 'Gas', default: true },
-      { key: 'cat.acqua', type: 'toggle', label: 'Acqua', default: true },
-      { key: 'cat.internet', type: 'toggle', label: 'Internet/Telefono', default: true },
-      { key: 'cat.bollo', type: 'toggle', label: 'Bollo auto', default: true },
-      { key: 'cat.auto', type: 'toggle', label: 'Manutenzione auto', default: true },
-      { key: 'cat.gse', type: 'toggle', label: 'Acconti GSE (entrate)', default: true },
+      { key: 'cat.manage', type: 'categories', label: 'Categorie' },
     ],
   },
   {
