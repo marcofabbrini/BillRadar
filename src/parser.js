@@ -3,31 +3,47 @@
 
 export const CATEGORIES = {
   luce: {
-    label: 'Luce', icon: '⚡', unit: 'kWh', color: '#f5b301', kind: 'cost',
+    label: 'Luce', icon: '⚡', unit: 'kWh', color: '#f5b301', kind: 'cost', scope: 'home',
     keywords: ['energia elettrica', 'kwh', 'pod ', 'codice pod', 'fornitura luce', 'potenza impegnata', 'enel', 'edison energia', 'a2a energia', 'eni plenitude', 'sorgenia'],
   },
   gas: {
-    label: 'Gas', icon: '🔥', unit: 'Smc', color: '#ef6c3c', kind: 'cost',
+    label: 'Gas', icon: '🔥', unit: 'Smc', color: '#ef6c3c', kind: 'cost', scope: 'home',
     keywords: ['gas naturale', 'smc', 'codice pdr', 'pdr ', 'fornitura gas', 'metano', 'coefficiente c'],
   },
   acqua: {
-    label: 'Acqua', icon: '💧', unit: 'm³', color: '#2f8fe0', kind: 'cost',
+    label: 'Acqua', icon: '💧', unit: 'm³', color: '#2f8fe0', kind: 'cost', scope: 'home',
     keywords: ['servizio idrico', 'acquedotto', 'fognatura', 'depurazione', 'metri cubi', 'consumo acqua', 'gruppo cap', 'mm spa', 'acea ato', 'hera acqua'],
   },
   internet: {
-    label: 'Internet/Telefono', icon: '📶', unit: '', color: '#8e5bd6', kind: 'cost',
+    label: 'Internet/Telefono', icon: '📶', unit: '', color: '#8e5bd6', kind: 'cost', scope: 'home',
     keywords: ['fibra', 'internet', 'linea fissa', 'telefonia', 'canone mensile', 'tim ', 'vodafone', 'fastweb', 'windtre', 'wind tre', 'iliad', 'sky wifi', 'offerta mobile'],
   },
   bollo: {
-    label: 'Bollo auto', icon: '🚗', unit: '', color: '#4a6572', kind: 'cost',
+    label: 'Bollo', icon: '🚗', unit: '', color: '#4a6572', kind: 'cost', scope: 'car',
     keywords: ['tassa automobilistica', 'bollo auto', 'aci ', 'automobile club', 'pagopa bollo', 'targa'],
   },
   auto: {
-    label: 'Manutenzione auto', icon: '🔧', unit: '', color: '#6d8b3a', kind: 'cost',
-    keywords: ['officina', 'tagliando', 'revisione', 'pneumatici', 'gommista', 'carrozzeria', 'ricambi', 'manodopera', 'assicurazione auto', 'rca'],
+    label: 'Manutenzione', icon: '🔧', unit: '', color: '#6d8b3a', kind: 'cost', scope: 'car',
+    keywords: ['officina', 'pneumatici', 'gommista', 'carrozzeria', 'ricambi', 'manodopera', 'cambio gomme', 'riparazione'],
+  },
+  tagliando: {
+    label: 'Tagliando', icon: '🛠️', unit: '', color: '#b08d3a', kind: 'cost', scope: 'car',
+    keywords: ['tagliando', 'revisione', 'cambio olio', 'filtro olio', 'controllo periodico', 'collaudo'],
+  },
+  carburante: {
+    label: 'Carburante', icon: '⛽', unit: 'L', color: '#c0562f', kind: 'cost', scope: 'car',
+    keywords: ['carburante', 'benzina', 'gasolio', 'diesel', 'gpl', 'rifornimento', 'distributore', 'self service'],
+  },
+  assicurazione: {
+    label: 'Assicurazione', icon: '🛡️', unit: '', color: '#3f7fbf', kind: 'cost', scope: 'car',
+    keywords: ['assicurazione auto', 'polizza', 'rca', 'responsabilità civile auto', 'premio assicurativo', 'kasko', 'unipol', 'generali', 'allianz', 'axa'],
+  },
+  ricarica: {
+    label: 'Ricarica', icon: '🔌', unit: 'kWh', color: '#1fb5a6', kind: 'cost', scope: 'car',
+    keywords: ['ricarica', 'colonnina', 'wallbox', 'supercharger', 'enel x way', 'be charge', 'ricarica elettrica', 'veicolo elettrico'],
   },
   gse: {
-    label: 'Acconti GSE', icon: '☀️', unit: 'kWh', color: '#22a06b', kind: 'income',
+    label: 'Acconti GSE', icon: '☀️', unit: 'kWh', color: '#22a06b', kind: 'income', scope: 'home',
     keywords: ['gse', 'gestore dei servizi energetici', 'ritiro dedicato', 'scambio sul posto', 'acconto', 'contributo in conto scambio', 'fotovoltaico', 'impianto fv', 'energia immessa'],
   },
 };

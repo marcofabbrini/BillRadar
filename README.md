@@ -104,6 +104,10 @@ Sotto i campi vedi la ricerca Gmail che ne risulta. Solo le mail con un PDF alle
 - **Impostazioni → Gmail → Sincronizza storico**: cerca le bollette più vecchie nel periodo scelto (ultimi 3 mesi, 1 anno, 3 anni, tutto). Da usare la prima volta e quando vuoi recuperare arretrati.
 - Quando arrivano bollette nuove compare in Home un avviso con quante sono e di che tipo, finché non lo chiudi.
 
+## Categorie per immobili e per vetture
+
+Ogni categoria è riferita a immobili o a vetture. **Immobili:** Luce, Gas, Acqua, Internet/Telefono, Acconti GSE. **Vetture:** Bollo, Manutenzione, Tagliando, Carburante, Assicurazione, Ricarica. Nel dettaglio di un documento, scegliendo la categoria l'elenco "Immobile / vettura" mostra solo i beni coerenti, e l'assegnazione automatica non abbina mai una bolletta di casa a un'auto o viceversa. Le categorie create da te hanno il campo "Si riferisce a" (immobili o vetture).
+
 ## Analisi prezzi
 
 La scheda **Prezzi** mostra, per l'ultima bolletta di ogni contratto (riconosciuto da POD/PDR, altrimenti da tipo, immobile e fornitore), il **prezzo finito**: totale della bolletta diviso i consumi, in €/kWh per la luce e €/Smc per il gas (Smc = standard metro cubo, l'unità con cui il gas è fatturato). Se nel PDF ci sono le voci ARERA, il prezzo è scomposto in materia prima, trasporto, oneri di sistema, imposte e IVA, con andamento sulle ultime bollette.

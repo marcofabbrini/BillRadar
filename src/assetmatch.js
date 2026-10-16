@@ -10,7 +10,9 @@
 //  3) il documento riporta un indirizzo che non corrisponde a nessun immobile registrato → MANUALE;
 //  4) nessuna informazione contraddittoria: scelta imparata (beni senza indirizzo) o unico bene adatto.
 
-export const KIND_BY_CATEGORY = { luce: 'home', gas: 'home', acqua: 'home', internet: 'home', gse: 'home', bollo: 'car', auto: 'car' };
+export const KIND_BY_CATEGORY = { luce: 'home', gas: 'home', acqua: 'home', internet: 'home', gse: 'home', bollo: 'car', auto: 'car', tagliando: 'car', carburante: 'car', assicurazione: 'car', ricarica: 'car' };
+/** Aggiorna l'ambito (immobile/vettura) di ogni categoria, comprese quelle personalizzate. */
+export function setKinds(map) { for (const k of Object.keys(KIND_BY_CATEGORY)) delete KIND_BY_CATEGORY[k]; Object.assign(KIND_BY_CATEGORY, map); }
 
 export const REASON_TEXT = {
   'shared-address': 'Più intestatari allo stesso indirizzo: assegna a mano.',
@@ -56,6 +58,9 @@ export function matchHolder(text, holder) {
 
 export function assignAsset({ text = '', category, supplier, holder, supplyAddress } = {}, assets = [], rules = {}) {
   const out = (asset, reason, extra = {}) => ({ asset, reason, ...extra });
+  // una categoria da immobile si assegna solo a immobili, una da vettura solo a vetture
+  const wanted = KIND_BY_CATEGORY[category];
+  if (wanted) assets = assets.filter((a) => a.kind === wanted);
   if (!assets.length) return out(null, 'none');
   const hayCompact = compact(text), hay = norm(text);
 

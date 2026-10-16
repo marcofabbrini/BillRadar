@@ -78,3 +78,18 @@ t('nessun bene → nessuna assegnazione; pickAsset restituisce solo il bene', ()
   assert.equal(pickAsset(doc('Mario Rossi', 'Via Roma 12 Milano'), [casa]).id, 'h1');
 });
 console.log(`\n${passed} test superati`);
+
+// categorie da vettura / da immobile
+import { KIND_BY_CATEGORY, setKinds } from '../src/assetmatch.js';
+t('categoria vettura non finisce su un immobile', () => {
+  const r = assignAsset({ text: 'Distributore Eni via Roma 5 rifornimento', category: 'carburante', supplyAddress: 'Via Roma 5' }, [casa, mare, panda]);
+  assert.equal(r.asset.id, 'c1');
+});
+t('categoria immobile non finisce su una vettura', () => {
+  const r = assignAsset({ text: 'fornitura luce', category: 'luce' }, [casa, panda]);
+  assert.equal(r.asset.id, casa.id);
+});
+t('categoria personalizzata da vettura', () => {
+  setKinds({ ...KIND_BY_CATEGORY, c_lavaggio: 'car' });
+  assert.equal(assignAsset({ text: 'lavaggio', category: 'c_lavaggio' }, [casa, panda]).asset.id, 'c1');
+});

@@ -80,8 +80,9 @@ const chartX = (m) => CH.L + ((CH.W - CH.L - CH.R) * m) / 11;
 
 // ---------- filtro per immobile / vettura ----------
 const applyAsset = (bills) => (state.asset === 'all' ? bills : state.asset === 'none' ? bills.filter((b) => !b.assetId) : bills.filter((b) => b.assetId === state.asset));
-const assetOptions = (value, { all = '🏠🚗 Tutti', none = true, placeholder = null } = {}) => {
+const assetOptions = (value, { all = '🏠🚗 Tutti', none = true, placeholder = null, only = null } = {}) => {
   const grp = (kind, label) => {
+    if (only && only !== kind) return '';
     const l = assets().filter((a) => a.kind === kind);
     return l.length ? `<optgroup label="${label}">${l.map((a) => `<option value="${a.id}" ${a.id === value ? 'selected' : ''}>${esc(assetLabel(a))}</option>`).join('')}</optgroup>` : '';
   };
@@ -269,6 +270,8 @@ async function renderDocs() {
   $('#add').onclick = () => openBill(null);
 }
 
+const scopeOf = (category) => (cats()[category] ? (cats()[category].scope || 'home') : null);
+
 async function openBill(id) {
   const b = id ? await db.bills.get(id) : { category: 'luce', issueDate: new Date().toISOString().slice(0, 10), source: 'manuale' };
   const dlg = $('#dlg');
@@ -276,9 +279,9 @@ async function openBill(id) {
   const field = (k, label, type = 'text') => `<label>${label}</label><input type="${type}" data-k="${k}" ${type === 'number' ? 'step="0.01"' : ''} value="${esc(b[k] ?? '')}">`;
   dlg.innerHTML = `
     <h2 style="margin:0 0 4px">${id ? 'Dettaglio documento' : 'Nuovo documento'}</h2>
-    <label>Categoria</label><select data-k="category">${Object.entries(cats()).map(([k, c]) => `<option value="${k}" ${b.category === k ? 'selected' : ''}>${c.icon} ${c.label}</option>`).join('')}</select>
+    <label>Categoria</label><select data-k="category">${['home', 'car'].map((sc) => `<optgroup label="${sc === 'car' ? 'Vetture' : 'Immobili'}">${Object.entries(cats()).filter(([, c]) => (c.scope || 'home') === sc).map(([k, c]) => `<option value="${k}" ${b.category === k ? 'selected' : ''}>${c.icon} ${c.label}</option>`).join('')}</optgroup>`).join('')}<option value="altro" ${b.category === 'altro' ? 'selected' : ''}>📄 Altro</option></select>
     <label>Immobile / vettura <b style="color:var(--bad)">*</b></label>
-    <select data-k="assetId" id="assetSel">${assetOptions(b.assetId || b.assetSuggest || (id ? '' : (assetById(state.asset) ? state.asset : '')), { placeholder: assets().length ? '— scegli a cosa si riferisce —' : '— nessuno: aggiungilo in Impostazioni —' })}</select>
+    <select data-k="assetId" id="assetSel">${assetOptions(b.assetId || b.assetSuggest || (id ? '' : (assetById(state.asset) ? state.asset : '')), { only: scopeOf(b.category), placeholder: assets().length ? '— scegli a cosa si riferisce —' : '— nessuno: aggiungilo in Impostazioni —' })}</select>
     ${!b.assetId && b.assetNote ? `<div class="hint" style="color:var(--warn,#ffb938);margin-top:6px">${esc(REASON_TEXT[b.assetNote] || '')}${b.assetSuggest ? ` Suggerito: ${esc(assetLabel(assetById(b.assetSuggest)))} (intestatario coincidente): controlla e conferma.` : ''}</div>` : ''}
     ${field('holder', 'Intestatario (dal documento)')}${field('supplyAddress', 'Indirizzo fornitura (dal documento)')}
     ${field('supplier', 'Fornitore')}${field('amount', 'Importo (€)', 'number')}${field('consumption', 'Consumo', 'number')}
@@ -294,6 +297,14 @@ async function openBill(id) {
       ${id ? '<button class="btn danger" id="del">Elimina</button>' : ''}
       <button class="btn sec" id="close">Chiudi</button></div>`;
   dlg.showModal();
+  // cambiando categoria si propongono solo immobili (luce, gas…) o solo vetture (bollo, carburante…)
+  const catSel = dlg.querySelector('[data-k=category]'), astSel = $('#assetSel', dlg);
+  const ph = astSel.options[0]?.value === '' ? astSel.options[0].textContent : '— scegli a cosa si riferisce —';
+  catSel.onchange = () => {
+    const keep = astSel.value, only = scopeOf(catSel.value);
+    astSel.innerHTML = assetOptions(keep, { only, placeholder: ph });
+    if (!astSel.value) astSel.value = '';
+  };
   $('#close', dlg).onclick = () => dlg.close();
   if (canDrive) $('#driveBtn', dlg).onclick = async () => {
     try {
@@ -642,7 +653,7 @@ async function catSettingsHtml() {
   let h = '';
   for (const [id, c] of Object.entries(cats())) {
     const on = (await getSetting(`cat.${id}`)) !== false;
-    h += `<div class="set-item"><div class="catline"><span class="catdot" style="background:${c.color}"></span><div><div>${c.icon} ${esc(c.label)}${c.custom ? ' <span class="tag2">tua</span>' : ''}</div><div class="hint">${c.kind === 'income' ? 'Entrata' : 'Spesa'}${c.unit ? ` · ${esc(c.unit)}` : ''}</div></div></div>
+    h += `<div class="set-item"><div class="catline"><span class="catdot" style="background:${c.color}"></span><div><div>${c.icon} ${esc(c.label)}${c.custom ? ' <span class="tag2">tua</span>' : ''}</div><div class="hint">${(c.scope === 'car' ? '🚗 Vetture · ' : '🏠 Immobili · ') + (c.kind === 'income' ? 'Entrata' : 'Spesa')}${c.unit ? ` · ${esc(c.unit)}` : ''}</div></div></div>
       <div class="acts">${c.custom ? `<button class="icon-btn" data-delcat="${id}" aria-label="Elimina ${esc(c.label)}">🗑</button>` : ''}<label class="switch"><input type="checkbox" data-catset="${id}" ${on ? 'checked' : ''}><span></span></label></div></div>`;
   }
   return h + '<div style="padding:12px 0"><button class="btn sec" id="addCat" style="width:100%">+ Aggiungi categoria</button></div>';
@@ -702,6 +713,7 @@ function openCategoryDialog() {
     <div class="chips" id="nc-icons">${icons.map((i) => `<button type="button" class="chip" data-i="${i}">${i}</button>`).join('')}</div>
     <input type="text" id="nc-icon" maxlength="4" value="📌" style="width:90px">
     <label>Colore</label><input type="color" id="nc-color" value="#35c8ff">
+    <label>Si riferisce a</label><select id="nc-scope"><option value="home">🏠 Immobili</option><option value="car">🚗 Vetture</option></select>
     <label>Tipo</label><select id="nc-kind"><option value="cost">Spesa</option><option value="income">Entrata</option></select>
     <label>Unità di misura (facoltativa)</label><input type="text" id="nc-unit" maxlength="8" placeholder="es. kWh, L, kg">
     <label>Parole chiave per riconoscerla (facoltative)</label>
@@ -715,7 +727,7 @@ function openCategoryDialog() {
     try {
       await addCategory({
         label: $('#nc-name', dlg).value, icon: $('#nc-icon', dlg).value, color: $('#nc-color', dlg).value,
-        kind: $('#nc-kind', dlg).value, unit: $('#nc-unit', dlg).value, keywords: $('#nc-kw', dlg).value,
+        kind: $('#nc-kind', dlg).value, scope: $('#nc-scope', dlg).value, unit: $('#nc-unit', dlg).value, keywords: $('#nc-kw', dlg).value,
       });
       dlg.close(); toast('Categoria aggiunta'); renderSettings();
     } catch (e) { toast(e.message, 4500); }

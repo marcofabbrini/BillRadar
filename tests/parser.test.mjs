@@ -81,6 +81,13 @@ t('manutenzione auto', () => {
   assert.equal(r.amount, 412.8);
 });
 
+t('nuove categorie vettura', () => {
+  assert.equal(parseBill('Distributore Q8 rifornimento gasolio litri 40 Totale documento € 72,00').category, 'carburante');
+  assert.equal(parseBill('Polizza assicurazione auto RCA premio assicurativo Importo € 410,00').category, 'assicurazione');
+  assert.equal(parseBill('Wallbox ricarica elettrica colonnina Totale € 18,50').category, 'ricarica');
+  assert.equal(parseBill('Revisione periodica e cambio olio, tagliando Totale documento € 190,00').category, 'tagliando');
+});
+
 t('acconto GSE (entrata)', () => {
   const r = parseBill(`GSE - Gestore dei Servizi Energetici
     Ritiro dedicato - impianto fotovoltaico
