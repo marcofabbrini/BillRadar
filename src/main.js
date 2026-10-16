@@ -16,7 +16,7 @@ import { listOffers, addOffer, updateOffer, deleteOffer } from './db.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const view = $('#view');
-const state = { asset: 'all', newIds: new Set(), cat: { id: null, y: 'all', m: 'all' }, year: new Date().getFullYear(), filter: 'all', q: '', statCat: 'luce', hidden: new Set(), openSet: new Set() };
+const state = { asset: 'all', owner: 'all', newIds: new Set(), cat: { id: null, y: 'all', m: 'all' }, year: new Date().getFullYear(), filter: 'all', q: '', statCat: 'luce', hidden: new Set(), openSet: new Set() };
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const cat = (id) => cats()[id] || { label: 'Altro', icon: '📄', color: '#888', kind: 'cost', unit: '' };
 const fmtDate = (d) => (d ? d.split('-').reverse().join('/') : '—');
@@ -79,11 +79,19 @@ function niceMax(v) {
 const chartX = (m) => CH.L + ((CH.W - CH.L - CH.R) * m) / 11;
 
 // ---------- filtro per immobile / vettura ----------
-const applyAsset = (bills) => (state.asset === 'all' ? bills : state.asset === 'none' ? bills.filter((b) => !b.assetId) : bills.filter((b) => b.assetId === state.asset));
-const assetOptions = (value, { all = '🏠🚗 Tutti', none = true, placeholder = null, only = null } = {}) => {
+// proprietario = intestatario indicato nella scheda di immobili e vetture
+const ownerKey = (h) => String(h || '').trim().toLowerCase().replace(/\s+/g, ' ');
+const owners = () => { const m = new Map(); for (const a of assets()) { const k = ownerKey(a.holder); if (k && !m.has(k)) m.set(k, a.holder.trim()); } return m; };
+const ownedBy = (a) => !!a && (state.owner === 'all' || ownerKey(a.holder) === state.owner);
+const applyAsset = (bills) => {
+  if (state.owner !== 'all' && !owners().has(state.owner)) state.owner = 'all';   // proprietario non più presente
+  if (state.owner !== 'all') bills = bills.filter((b) => ownedBy(assetById(b.assetId)));
+  return state.asset === 'all' ? bills : state.asset === 'none' ? bills.filter((b) => !b.assetId) : bills.filter((b) => b.assetId === state.asset);
+};
+const assetOptions = (value, { all = '🏠🚗 Tutti', none = true, placeholder = null, only = null, owned = false } = {}) => {
   const grp = (kind, label) => {
     if (only && only !== kind) return '';
-    const l = assets().filter((a) => a.kind === kind);
+    const l = assets().filter((a) => a.kind === kind && (!owned || ownedBy(a)));
     return l.length ? `<optgroup label="${label}">${l.map((a) => `<option value="${a.id}" ${a.id === value ? 'selected' : ''}>${esc(assetLabel(a))}</option>`).join('')}</optgroup>` : '';
   };
   return (placeholder ? `<option value="">${placeholder}</option>` : `<option value="all" ${value === 'all' ? 'selected' : ''}>${all}</option>`)
@@ -91,10 +99,22 @@ const assetOptions = (value, { all = '🏠🚗 Tutti', none = true, placeholder 
     + (none && !placeholder ? `<option value="none" ${value === 'none' ? 'selected' : ''}>Senza assegnazione</option>` : '');
 };
 /** Selettore del bene (mostrato solo se ne esiste almeno uno). */
-const assetSelect = (id = 'as') => (assets().length ? `<select id="${id}" aria-label="Immobile o vettura">${assetOptions(state.asset)}</select>` : '');
+const assetSelect = (id = 'as') => {
+  if (!assets().length) return '';
+  const ow = owners();
+  const ownerSel = ow.size >= 2 ? `<select id="${id}-o" aria-label="Proprietario"><option value="all">👤 Tutti i proprietari</option>${[...ow].map(([k, n]) => `<option value="${esc(k)}" ${k === state.owner ? 'selected' : ''}>👤 ${esc(n)}</option>`).join('')}</select>` : '';
+  const sel = `<select id="${id}" aria-label="Immobile o vettura">${assetOptions(state.asset, { owned: true })}</select>`;
+  return ownerSel ? `<div class="asel">${ownerSel}${sel}</div>` : sel;
+};
 const bindAssetSelect = (rerender, id = 'as') => {
-  const el = $(`#${id}`);
+  const el = $(`#${id}`), eo = $(`#${id}-o`);
   if (el) el.onchange = async (e) => { state.asset = e.target.value; await setKV('ui.asset', state.asset); rerender(); };
+  if (eo) eo.onchange = async (e) => {
+    state.owner = e.target.value; await setKV('ui.owner', state.owner);
+    // il bene scelto resta solo se appartiene al proprietario; "senza assegnazione" non ha proprietario
+    if (state.asset === 'none' || (assetById(state.asset) && !ownedBy(assetById(state.asset)))) { state.asset = 'all'; await setKV('ui.asset', 'all'); }
+    rerender();
+  };
 };
 const assetTag = (b) => {
   if (!assets().length) return '';
@@ -811,7 +831,7 @@ async function runAction(key) {
       inp.onchange = async () => { await importAll(JSON.parse(await inp.files[0].text())); await loadCategories(); await loadAssets(); toast('Backup importato'); route(); };
       inp.click();
     } else if (key === 'action.wipe') {
-      if (confirm('Cancellare TUTTI i dati dal telefono? L\'operazione non è reversibile.')) { await wipeAll(); await loadCategories(); await loadAssets(); state.asset = 'all'; applyEcg(); toast('Dati cancellati'); route(); }
+      if (confirm('Cancellare TUTTI i dati dal telefono? L\'operazione non è reversibile.')) { await wipeAll(); await loadCategories(); await loadAssets(); state.asset = 'all'; state.owner = 'all'; applyEcg(); toast('Dati cancellati'); route(); }
     }
   } catch (e) { toast(e.message, 6000); }
 }
@@ -928,7 +948,7 @@ async function route() {
   window.scrollTo(0, 0);
   pushWidget();   // il widget sulla Home segue i dati dell'app
 }
-view.addEventListener('click', (e) => { const a = e.target.closest('[data-filter]'); if (a) { state.filter = a.dataset.filter; if (a.dataset.filter === 'unassigned') state.asset = 'all'; } });
+view.addEventListener('click', (e) => { const a = e.target.closest('[data-filter]'); if (a) { state.filter = a.dataset.filter; if (a.dataset.filter === 'unassigned') { state.asset = 'all'; state.owner = 'all'; } } });
 window.addEventListener('hashchange', route);
 
 (async () => {
@@ -939,6 +959,8 @@ window.addEventListener('hashchange', route);
   applyEcg(await getSetting('ui.ecgColor'));
   state.asset = await getKV('ui.asset', 'all');
   if (!['all', 'none'].includes(state.asset) && !assetById(state.asset)) state.asset = 'all';
+  state.owner = await getKV('ui.owner', 'all');
+  if (state.owner !== 'all' && !owners().has(state.owner)) state.owner = 'all';
   state.hidden = new Set(await getKV('ui.hiddenSeries', []));
   const t0 = performance.now();
   await route();
