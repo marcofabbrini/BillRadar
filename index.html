@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b6e6e" />
+  <title>BillRadar</title>
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <header class="top"><h1><span class="logo">◉</span> BillRadar</h1><button id="syncBtn" class="ghost" title="Sincronizza Gmail">⟳ Sincronizza</button></header>
+  <div id="progress" class="progress" hidden><div></div><span></span></div>
+  <main id="view"></main>
+  <nav class="tabs">
+    <a href="#/home" data-tab="home"><i>🏠</i>Home</a>
+    <a href="#/docs" data-tab="docs"><i>🧾</i>Documenti</a>
+    <a href="#/stats" data-tab="stats"><i>📊</i>Statistiche</a>
+    <a href="#/settings" data-tab="settings"><i>⚙️</i>Impostazioni</a>
+  </nav>
+  <dialog id="dlg"></dialog>
+  <div id="toast" class="toast" hidden></div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

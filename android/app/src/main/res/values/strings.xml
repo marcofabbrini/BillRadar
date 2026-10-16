@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">BillRadar</string>
+    <string name="title_activity_main">BillRadar</string>
+    <string name="package_name">com.marcofabbrini.billradar</string>
+    <string name="custom_url_scheme">com.marcofabbrini.billradar</string>
+</resources>

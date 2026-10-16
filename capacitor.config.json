@@ -1,0 +1,6 @@
+{
+  "appId": "com.marcofabbrini.billradar",
+  "appName": "BillRadar",
+  "webDir": "dist",
+  "android": { "allowMixedContent": false }
+}
