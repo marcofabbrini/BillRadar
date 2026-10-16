@@ -72,6 +72,10 @@ Nota: con `drive.file` l'app non riusa una cartella "BillRadar" creata a mano; n
 - **Impostazioni → Gmail → Sincronizza storico**: cerca le bollette più vecchie nel periodo scelto (ultimi 3 mesi, 1 anno, 3 anni, tutto). Da usare la prima volta e quando vuoi recuperare arretrati.
 - Quando arrivano bollette nuove compare in Home un avviso con quante sono e di che tipo, finché non lo chiudi.
 
+## Widget
+
+Tieni premuto sulla Home di Android → **Widget** → BillRadar "Andamento bollette". Alla creazione scegli quali serie mostrare (poi: tieni premuto il widget → Impostazioni). Si ridimensiona liberamente, anche a tutta larghezza; mostra l'andamento degli ultimi 12 mesi e un indicatore con le bollette nuove degli ultimi 7 giorni. Si aggiorna quando apri l'app o sincronizzi.
+
 ## Limiti noti
 
 - I PDF scansionati come immagine (senza testo) non vengono letti: finiscono tra i "da verificare" o vengono saltati. Non c'è OCR.

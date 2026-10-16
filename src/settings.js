@@ -58,6 +58,14 @@ export const SETTINGS_SCHEMA = [
     ],
   },
   {
+    id: 'widget', title: 'Widget', icon: '📈',
+    items: [
+      { key: 'widget.how', type: 'info', label: 'Tieni premuto sulla schermata Home di Android → Widget → BillRadar "Andamento bollette". Alla creazione scegli quali serie mostrare.' },
+      { key: 'widget.size', type: 'info', label: 'Si ridimensiona trascinando i bordi (anche a tutta larghezza). Mostra il grafico degli ultimi 12 mesi e quante bollette nuove sono arrivate negli ultimi 7 giorni.' },
+      { key: 'widget.edit', type: 'info', label: 'Per cambiare le serie in seguito: tieni premuto il widget → Impostazioni. Il widget si aggiorna quando apri l\'app o sincronizzi.' },
+    ],
+  },
+  {
     id: 'future', title: 'In arrivo', icon: '🧭',
     items: [
       { key: 'future.notice', type: 'info', label: 'Qui compariranno le nuove funzioni (promemoria scadenze, soglie di spesa, altri mittenti…).' },

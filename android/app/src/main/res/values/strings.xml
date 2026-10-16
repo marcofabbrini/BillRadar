@@ -4,4 +4,6 @@
     <string name="title_activity_main">BillRadar</string>
     <string name="package_name">com.marcofabbrini.billradar</string>
     <string name="custom_url_scheme">com.marcofabbrini.billradar</string>
+    <string name="widget_name">Andamento bollette</string>
+    <string name="widget_desc">Grafico degli andamenti e nuove bollette degli ultimi 7 giorni</string>
 </resources>

@@ -6,6 +6,7 @@ import { eur, num, MONTH_LABELS, years, monthlyByCategory, totals, consumption, 
 import * as gmail from './gmail.js';
 import * as drive from './drive.js';
 import { renderPdf } from './pdf.js';
+import { pushWidget } from './widget.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const view = $('#view');
@@ -592,6 +593,7 @@ async function route() {
   moveIndicator();
   if (tab === 'cat') renderCat(decodeURIComponent(arg || '')); else ({ home: renderHome, docs: renderDocs, stats: renderStats, settings: renderSettings }[tab] || renderHome)();
   window.scrollTo(0, 0);
+  pushWidget();   // il widget sulla Home segue i dati dell'app
 }
 view.addEventListener('click', (e) => { const a = e.target.closest('[data-filter]'); if (a) state.filter = a.dataset.filter; });
 window.addEventListener('hashchange', route);
