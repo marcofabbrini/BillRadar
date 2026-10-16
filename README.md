@@ -65,6 +65,19 @@ Nota: con `drive.file` l'app non riusa una cartella "BillRadar" creata a mano; n
 - **Ripristino**: "Ripristina da Drive" prende l'ultimo backup e reinserisce i documenti senza duplicare quelli già presenti. I PDF restano su Drive e si aprono da "Vedi PDF". Per ritrovare i file dopo una reinstallazione serve lo stesso Client ID.
 - **Libera spazio**: toglie dal telefono i PDF già presenti su Drive (controlla uno per uno che esistano ancora). Impostazioni → Dati mostra quanto spazio occupano i documenti.
 
+## Immobili e vetture
+
+In **Impostazioni → Immobili e vetture** aggiungi le case e le auto. **Ogni bolletta deve riferirsi a uno di essi** (campo obbligatorio nel dettaglio del documento).
+
+- **Assegnazione automatica** alle nuove bollette trovate in Gmail, in quest'ordine: parole di riconoscimento dell'immobile/vettura presenti nel PDF (indirizzo, targa, codice POD/PDR…, da inserire nella scheda); la scelta fatta l'ultima volta per la stessa categoria e lo stesso fornitore; l'unico immobile (utenze) o l'unica vettura (bollo, manutenzione) se ce n'è uno solo. Altrimenti la bolletta resta "da assegnare".
+- Quando assegni una bolletta, la scelta viene applicata anche alle altre ancora senza bene con la stessa categoria e lo stesso fornitore.
+- **Filtro** per immobile/vettura in Home, Documenti, Statistiche e nell'elenco per categoria; in Home un avviso segnala le bollette da assegnare.
+- Eliminare un immobile o una vettura non cancella le bollette: tornano "da assegnare".
+
+## Personalizzazione
+
+**Impostazioni → Aspetto → Colore della striscia in alto**: scegli tra i colori proposti o un colore a piacere.
+
 ## Filtro delle mail
 
 In **Impostazioni → Gmail** scegli quali mail analizzare:

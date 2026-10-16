@@ -33,6 +33,12 @@ export const SETTINGS_SCHEMA = [
     ],
   },
   {
+    id: 'assets', title: 'Immobili e vetture', icon: '🏡',
+    items: [
+      { key: 'assets.manage', type: 'assets', label: 'Immobili e vetture' },
+    ],
+  },
+  {
     id: 'categories', title: 'Categorie', icon: '🗂️',
     items: [
       { key: 'cat.manage', type: 'categories', label: 'Categorie' },
@@ -49,6 +55,7 @@ export const SETTINGS_SCHEMA = [
     id: 'appearance', title: 'Aspetto', icon: '🎨',
     items: [
       { key: 'ui.theme', type: 'select', label: 'Tema', options: [['dark', 'Scuro (neon)'], ['light', 'Chiaro'], ['auto', 'Automatico']], default: 'dark' },
+      { key: 'ui.ecgColor', type: 'color', label: 'Colore della striscia in alto', hint: 'La linea del battito nel banner.', default: '#6fe0ff', presets: ['#6fe0ff', '#4ade80', '#fbbf24', '#fb7185', '#c084fc', '#f97316', '#ffffff'] },
     ],
   },
   {

@@ -8,10 +8,11 @@ import * as drive from './drive.js';
 import { renderPdf } from './pdf.js';
 import { pushWidget } from './widget.js';
 import { buildGmailQuery, invalidSenders } from './query.js';
+import { assets, assetById, assetLabel, loadAssets, saveAsset, removeAsset, countUnassigned, assignAllUnassigned, learnAssignment, KIND_LABEL, KIND_ICON } from './assets.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const view = $('#view');
-const state = { newIds: new Set(), cat: { id: null, y: 'all', m: 'all' }, year: new Date().getFullYear(), filter: 'all', q: '', statCat: 'luce', hidden: new Set(), openSet: new Set() };
+const state = { asset: 'all', newIds: new Set(), cat: { id: null, y: 'all', m: 'all' }, year: new Date().getFullYear(), filter: 'all', q: '', statCat: 'luce', hidden: new Set(), openSet: new Set() };
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const cat = (id) => cats()[id] || { label: 'Altro', icon: '📄', color: '#888', kind: 'cost', unit: '' };
 const fmtDate = (d) => (d ? d.split('-').reverse().join('/') : '—');
@@ -72,6 +73,29 @@ function niceMax(v) {
   return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * e;
 }
 const chartX = (m) => CH.L + ((CH.W - CH.L - CH.R) * m) / 11;
+
+// ---------- filtro per immobile / vettura ----------
+const applyAsset = (bills) => (state.asset === 'all' ? bills : state.asset === 'none' ? bills.filter((b) => !b.assetId) : bills.filter((b) => b.assetId === state.asset));
+const assetOptions = (value, { all = '🏠🚗 Tutti', none = true, placeholder = null } = {}) => {
+  const grp = (kind, label) => {
+    const l = assets().filter((a) => a.kind === kind);
+    return l.length ? `<optgroup label="${label}">${l.map((a) => `<option value="${a.id}" ${a.id === value ? 'selected' : ''}>${esc(assetLabel(a))}</option>`).join('')}</optgroup>` : '';
+  };
+  return (placeholder ? `<option value="">${placeholder}</option>` : `<option value="all" ${value === 'all' ? 'selected' : ''}>${all}</option>`)
+    + grp('home', 'Immobili') + grp('car', 'Vetture')
+    + (none && !placeholder ? `<option value="none" ${value === 'none' ? 'selected' : ''}>Senza assegnazione</option>` : '');
+};
+/** Selettore del bene (mostrato solo se ne esiste almeno uno). */
+const assetSelect = (id = 'as') => (assets().length ? `<select id="${id}" aria-label="Immobile o vettura">${assetOptions(state.asset)}</select>` : '');
+const bindAssetSelect = (rerender, id = 'as') => {
+  const el = $(`#${id}`);
+  if (el) el.onchange = async (e) => { state.asset = e.target.value; await setKV('ui.asset', state.asset); rerender(); };
+};
+const assetTag = (b) => {
+  if (!assets().length) return '';
+  const a = assetById(b.assetId);
+  return a ? `<span class="tag2">${esc(assetLabel(a))}</span>` : '<span class="tag">da assegnare</span>';
+};
 
 let chartMax = 1;
 function lineChart(byCat, vis) {
@@ -159,7 +183,9 @@ async function enabledCats() {
 
 // ---------- Home ----------
 async function renderHome() {
-  const bills = await listBills();
+  const allBills = await listBills();
+  const bills = applyAsset(allBills);
+  const unassigned = assets().length ? allBills.filter((b) => !b.assetId).length : 0;
   const ids = await enabledCats();
   const ys = years(bills);
   if (!ys.includes(state.year)) state.year = ys[0];
@@ -179,7 +205,8 @@ async function renderHome() {
     ${reauth ? '<div class="card" style="border-color:var(--bad)"><b>Gmail non è più collegato.</b> <button class="btn" id="reauth" style="margin-top:8px;width:100%">Riconnetti Gmail</button></div>' : ''}
     ${fresh.length ? `<div class="card notice enter" style="--i:0"><div class="nt"><span class="bell">🔔</span><div><b>${fresh.length} ${fresh.length > 1 ? 'nuove bollette' : 'nuova bolletta'}</b><div class="s">${esc(freshTxt)}</div></div></div>
       <div class="nb"><button class="btn" id="nSee">Vedi</button><button class="btn sec" id="nOk">Ok</button></div></div>` : ''}
-    <select id="yr" aria-label="Anno">${ys.map((v) => `<option ${v === state.year ? 'selected' : ''}>${v}</option>`).join('')}</select>
+    ${unassigned ? `<div class="card enter" style="--i:1"><b>${unassigned}</b> bollett${unassigned > 1 ? 'e' : 'a'} senza immobile o vettura <a href="#/docs" data-filter="unassigned" style="float:right">Assegna →</a></div>` : ''}
+    <div class="${assets().length ? 'grid2' : ''}" style="margin:0"><select id="yr" aria-label="Anno">${ys.map((v) => `<option ${v === state.year ? 'selected' : ''}>${v}</option>`).join('')}</select>${assetSelect()}</div>
     <div class="grid enter" style="margin-top:12px;--i:1">
       <div class="kpi glow"><small>Spese ${state.year}</small><b data-count="${t.spese}">${eur(t.spese)}</b>
         ${y.pct != null ? `<small class="${y.pct > 0 ? 'neg' : 'pos'}">${y.pct > 0 ? '▲' : '▼'} ${num(Math.abs(y.pct), 1)}% vs ${state.year - 1}</small>` : '<small>&nbsp;</small>'}</div>
@@ -194,6 +221,7 @@ async function renderHome() {
     }).join('')}</div>
     ${next.length ? `<div class="card enter" style="--i:4"><h3>Prossime scadenze</h3>${next.slice(0, 5).map((b) => billRow(b, true)).join('')}</div>` : ''}`;
   $('#yr').onchange = (e) => { state.year = Number(e.target.value); renderHome(); };
+  bindAssetSelect(renderHome);
   if (reauth) $('#reauth').onclick = () => runAction('action.connect');
   if (fresh.length) {
     $('#nOk').onclick = async () => { await setKV('ui.newBills', []); renderHome(); };
@@ -210,25 +238,27 @@ function billRow(b, showDue = false) {
   const c = cat(b.category);
   const sub = showDue ? `Scade ${fmtDate(b.dueDate)}` : `${fmtDate(b.issueDate)} · ${esc(b.supplier || b.fileName || '')}`;
   return `<div class="row" data-id="${b.id}"><div class="ico" style="background:${c.color}22">${c.icon}</div>
-    <div class="grow"><div class="t">${c.label}${b.needsReview ? ' <span class="tag">verifica</span>' : ''}</div><div class="s">${sub}</div></div>
+    <div class="grow"><div class="t">${c.label}${b.needsReview ? ' <span class="tag">verifica</span>' : ''} ${assetTag(b)}</div><div class="s">${sub}</div></div>
     <b class="${c.kind === 'income' ? 'pos' : ''}">${c.kind === 'income' ? '+' : ''}${eur(b.amount)}</b></div>`;
 }
 
 // ---------- Documenti ----------
 async function renderDocs() {
-  const bills = await listBills();
+  const bills = applyAsset(await listBills());
   const ids = await enabledCats();
   const f = state.filter;
   const q = state.q.toLowerCase();
-  const rows = bills.filter((b) => (f === 'all' || (f === 'review' ? b.needsReview : f === 'new' ? state.newIds.has(b.id) : b.category === f))
+  const rows = bills.filter((b) => (f === 'all' || (f === 'review' ? b.needsReview : f === 'new' ? state.newIds.has(b.id) : f === 'unassigned' ? !b.assetId : b.category === f))
     && (!q || `${b.supplier} ${b.fileName} ${b.invoiceNumber} ${b.subject}`.toLowerCase().includes(q)));
   view.innerHTML = `
     <input type="search" id="q" placeholder="Cerca fornitore, numero…" value="${esc(state.q)}">
+    ${assets().length ? `<div style="margin-top:10px">${assetSelect()}</div>` : ''}
     <div class="chips" style="margin-top:10px">
-      ${[['all', 'Tutti'], ...(state.newIds.size ? [['new', 'Nuove']] : []), ['review', 'Da verificare'], ...ids.map((id) => [id, cat(id).label])].map(([k, l]) => `<button class="chip ${f === k ? 'on' : ''}" data-f="${k}">${l}</button>`).join('')}
+      ${[['all', 'Tutti'], ...(state.newIds.size ? [['new', 'Nuove']] : []), ...(assets().length ? [['unassigned', 'Da assegnare']] : []), ['review', 'Da verificare'], ...ids.map((id) => [id, cat(id).label])].map(([k, l]) => `<button class="chip ${f === k ? 'on' : ''}" data-f="${k}">${l}</button>`).join('')}
     </div>
     <div class="card enter" style="--i:1">${rows.length ? rows.map((b) => billRow(b)).join('') : emptyState('Nessun documento', 'Qui compariranno le bollette trovate in Gmail.')}</div>
     <button class="btn" id="add" style="width:100%">+ Aggiungi manualmente</button>`;
+  bindAssetSelect(renderDocs);
   $('#q').oninput = (e) => { state.q = e.target.value; clearTimeout(renderDocs.t); renderDocs.t = setTimeout(renderDocs, 250); };
   view.querySelectorAll('.chip').forEach((c) => (c.onclick = () => { state.filter = c.dataset.f; renderDocs(); }));
   view.querySelectorAll('.row[data-id]').forEach((r) => (r.onclick = () => openBill(Number(r.dataset.id))));
@@ -243,6 +273,8 @@ async function openBill(id) {
   dlg.innerHTML = `
     <h2 style="margin:0 0 4px">${id ? 'Dettaglio documento' : 'Nuovo documento'}</h2>
     <label>Categoria</label><select data-k="category">${Object.entries(cats()).map(([k, c]) => `<option value="${k}" ${b.category === k ? 'selected' : ''}>${c.icon} ${c.label}</option>`).join('')}</select>
+    <label>Immobile / vettura <b style="color:var(--bad)">*</b></label>
+    <select data-k="assetId" id="assetSel">${assetOptions(b.assetId || (id ? '' : (assetById(state.asset) ? state.asset : '')), { placeholder: assets().length ? '— scegli a cosa si riferisce —' : '— nessuno: aggiungilo in Impostazioni —' })}</select>
     ${field('supplier', 'Fornitore')}${field('amount', 'Importo (€)', 'number')}${field('consumption', 'Consumo', 'number')}
     ${field('issueDate', 'Data documento', 'date')}${field('periodFrom', 'Periodo da', 'date')}${field('periodTo', 'Periodo a', 'date')}
     ${field('dueDate', 'Scadenza', 'date')}${field('invoiceNumber', 'Numero documento')}
@@ -277,16 +309,23 @@ async function openBill(id) {
       const k = el.dataset.k;
       patch[k] = el.type === 'checkbox' ? el.checked : el.type === 'number' ? (el.value === '' ? null : Number(el.value)) : (el.value || null);
     });
+    // il tag è obbligatorio: ogni bolletta deve riferirsi a un immobile o a una vettura
+    if (!assets().length) { toast('Aggiungi prima un immobile o una vettura in Impostazioni', 5000); return; }
+    if (!patch.assetId) { const sel = $('#assetSel', dlg); sel.classList.add('invalid'); sel.focus(); toast('Scegli a quale immobile o vettura si riferisce', 4000); return; }
     patch.unit = cat(patch.category).unit;
     patch.needsReview = false;
-    if (id) await updateBill(id, patch); else await addBill({ ...b, ...patch });
+    const savedId = id || await addBill({ ...b, ...patch });
+    if (id) await updateBill(id, patch);
     let note = '';
+    // ricorda la scelta (categoria + fornitore → bene) e la applica alle bollette simili ancora senza bene
+    const similar = await learnAssignment({ ...b, ...patch, id: savedId }, patch.assetId);
+    if (similar) note += ` · assegnata anche ad altre ${similar} simili`;
     if (id && b.driveFileId && (await drive.isDriveEnabled())) {
       // dati cambiati → il file su Drive viene rinominato/spostato di conseguenza
       try {
         const r = await drive.archiveBill({ ...b, ...patch }, b.pdf);
         if (r) await updateBill(id, { driveFileId: r.fileId, drivePath: r.path });
-      } catch (e) { note = ` (Drive non aggiornato: ${e.message})`; }
+      } catch (e) { note += ` (Drive non aggiornato: ${e.message})`; }
     }
     dlg.close(); toast(`Salvato${note}`, note ? 7000 : 2500); route();
   };
@@ -294,7 +333,7 @@ async function openBill(id) {
 
 // ---------- Statistiche ----------
 async function renderStats() {
-  const bills = await listBills();
+  const bills = applyAsset(await listBills());
   const ids = await enabledCats();
   const ys = years(bills);
   if (!ys.includes(state.year)) state.year = ys[0];
@@ -308,6 +347,7 @@ async function renderStats() {
   view.innerHTML = `
     <div style="display:flex;gap:8px"><select id="cat">${ids.map((id) => `<option value="${id}" ${id === state.statCat ? 'selected' : ''}>${cat(id).icon} ${cat(id).label}</option>`).join('')}</select>
     <select id="yr" style="width:110px">${ys.map((v) => `<option ${v === state.year ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
+    ${assets().length ? `<div style="margin-top:8px">${assetSelect()}</div>` : ''}
     <div class="card enter" style="margin-top:12px;--i:1"><h3>${c.kind === 'income' ? 'Entrate' : 'Spesa'} mensile · ${state.year}</h3>${simpleBars(byCat[state.statCat], c.color)}
       <div class="grid" style="margin-top:8px"><div><small class="mut">Totale</small><br><b>${eur(tot)}</b></div><div><small class="mut">Media/mese</small><br><b>${eur(tot / 12)}</b></div></div></div>
     ${c.unit && cons.count ? `<div class="card enter" style="--i:2"><h3>Consumo (${c.unit})</h3>${simpleBars(cons.monthly, c.color)}
@@ -317,6 +357,7 @@ async function renderStats() {
       <div class="row"><div class="grow">Costo luce</div><b>${eur(luceCost)}</b></div>
       <div class="row"><div class="grow">Acconti GSE</div><b class="pos">${eur(gseIn)}</b></div>
       <div class="row"><div class="grow"><b>Costo netto energia</b></div><b class="${luceCost - gseIn <= 0 ? 'pos' : ''}">${eur(luceCost - gseIn)}</b></div></div>` : ''}`;
+  bindAssetSelect(renderStats);
   $('#cat').onchange = (e) => { state.statCat = e.target.value; renderStats(); };
   $('#yr').onchange = (e) => { state.year = Number(e.target.value); renderStats(); };
 }
@@ -341,6 +382,8 @@ async function renderSettings() {
         html += `<div class="set-item"><div>${it.label}${it.key === 'action.connect' ? `<div class="hint">${connected ? 'Collegato' : 'Non collegato'}${last ? ' · ultimo sync ' + new Date(last).toLocaleString('it-IT') : ''}</div>` : hint}</div><button class="btn ${it.danger ? 'danger' : 'sec'}" data-a="${it.key}">${it.key === 'action.connect' ? label : 'Esegui'}</button></div>`;
       } else if (it.type === 'categories') html += catHtml;
       else if (it.type === 'storage') html += stoHtml;
+      else if (it.type === 'assets') html += assetSettingsHtml();
+      else if (it.type === 'color') html += `<div style="padding:10px 0;border-bottom:1px solid var(--line)"><div>${it.label}</div>${hint}<div class="swatches">${it.presets.map((c) => `<button type="button" class="sw ${String(v).toLowerCase() === c ? 'on' : ''}" data-ecg="${c}" style="background:${c}" aria-label="${c}"></button>`).join('')}<input type="color" data-s="${it.key}" data-color value="${esc(v)}" aria-label="Colore personalizzato"><button type="button" class="btn sec" data-ecgreset="${it.default}">Ripristina</button></div></div>`;
       else if (it.type === 'list') {
         const arr = Array.isArray(v) ? v : [];
         html += `<div class="list-set" data-list="${it.key}" style="padding:10px 0;border-bottom:1px solid var(--line)"><div>${it.label}</div>${hint}
@@ -352,6 +395,20 @@ async function renderSettings() {
     html += '</div></details>';
   }
   view.innerHTML = html + `<p class="mut" style="text-align:center">BillRadar ${__APP_VERSION__} · dati salvati solo su questo dispositivo</p>`;
+
+  // colore della striscia ECG: anteprima dal vivo
+  view.querySelectorAll('[data-ecg]').forEach((el) => (el.onclick = async () => { await setSetting('ui.ecgColor', el.dataset.ecg); applyEcg(el.dataset.ecg); renderSettings(); }));
+  view.querySelectorAll('[data-ecgreset]').forEach((el) => (el.onclick = async () => { await setSetting('ui.ecgColor', el.dataset.ecgreset); applyEcg(el.dataset.ecgreset); renderSettings(); }));
+  view.querySelectorAll('input[data-color]').forEach((el) => (el.oninput = () => applyEcg(el.value)));
+  // immobili e vetture
+  const addA = $('#addAsset'); if (addA) addA.onclick = () => openAssetDialog();
+  view.querySelectorAll('[data-editasset]').forEach((el) => (el.onclick = () => openAssetDialog(el.dataset.editasset)));
+  view.querySelectorAll('[data-delasset]').forEach((el) => (el.onclick = async (e) => {
+    e.stopPropagation();
+    const a = assetById(el.dataset.delasset);
+    if (!confirm(`Eliminare "${a.name}"? Le sue bollette resteranno, ma torneranno "da assegnare".`)) return;
+    await removeAsset(a.id); if (state.asset === a.id) state.asset = 'all'; toast('Eliminato'); renderSettings();
+  }));
 
   // elenchi (mittenti, testi): ogni riga si salva da sola; la ricerca risultante si aggiorna subito
   const readList = (key) => [...view.querySelectorAll(`input[data-l="${key}"]`)].map((i) => i.value);
@@ -390,6 +447,7 @@ async function renderSettings() {
     }
     await setSetting(el.dataset.s, val);
     if (el.dataset.s === 'ui.theme') applyTheme(val);
+    if (el.dataset.s === 'ui.ecgColor') applyEcg(val);
     if (el.dataset.s === 'gmail.generic') refreshPreview();
   }));
   view.querySelectorAll('[data-a]').forEach((el) => (el.onclick = () => runAction(el.dataset.a)));
@@ -417,6 +475,41 @@ async function catSettingsHtml() {
   }
   return h + '<div style="padding:12px 0"><button class="btn sec" id="addCat" style="width:100%">+ Aggiungi categoria</button></div>';
 }
+
+function assetSettingsHtml() {
+  const list = assets();
+  const rows = list.map((a) => `<div class="set-item" data-editasset="${a.id}" style="cursor:pointer"><div class="catline"><span class="ico" style="width:38px;height:38px;border-radius:12px;display:grid;place-items:center;font-size:18px;background:var(--acc-soft)">${KIND_ICON[a.kind]}</span><div><div>${esc(a.name)}</div><div class="hint">${KIND_LABEL[a.kind]}${a.match?.length ? ` · riconosce: ${esc(a.match.join(', '))}` : ''}</div></div></div>
+      <div class="acts"><button class="icon-btn" data-delasset="${a.id}" aria-label="Elimina ${esc(a.name)}">🗑</button></div></div>`).join('');
+  return `${rows || '<div class="set-item mut">Nessun immobile o vettura. Aggiungili: ogni bolletta dovrà riferirsi a uno di essi.</div>'}
+    <div style="padding:12px 0;display:flex;gap:8px"><button class="btn sec" id="addAsset" style="flex:1">+ Aggiungi immobile o vettura</button></div>`;
+}
+
+function openAssetDialog(id = null) {
+  const a = id ? assetById(id) : null;
+  const dlg = $('#dlg');
+  dlg.innerHTML = `
+    <h2 style="margin:0 0 4px">${a ? 'Modifica' : 'Nuovo'} immobile o vettura</h2>
+    <label>Tipo</label><select id="as-kind"><option value="home" ${a?.kind !== 'car' ? 'selected' : ''}>🏠 Immobile</option><option value="car" ${a?.kind === 'car' ? 'selected' : ''}>🚗 Vettura</option></select>
+    <label>Nome</label><input type="text" id="as-name" maxlength="30" placeholder="es. Casa, Casa al mare, Panda" autocomplete="off" value="${esc(a?.name || '')}">
+    <label>Parole di riconoscimento (facoltative)</label>
+    <input type="text" id="as-match" placeholder="es. via Roma 12, AB123CD, IT001E12345678" autocomplete="off" value="${esc((a?.match || []).join(', '))}">
+    <div class="hint" style="margin-top:6px">Separate da virgole: indirizzo, targa, codice POD/PDR… Se compaiono nel PDF, le nuove bollette trovate in Gmail vengono assegnate da sole.</div>
+    <div style="display:flex;gap:8px;margin-top:16px"><button class="btn" id="as-save">Salva</button><button class="btn sec" id="as-cancel">Annulla</button></div>`;
+  dlg.showModal();
+  $('#as-cancel', dlg).onclick = () => dlg.close();
+  $('#as-save', dlg).onclick = async () => {
+    try {
+      const wasEmpty = assets().length === 0;
+      const rec = await saveAsset({ id, kind: $('#as-kind', dlg).value, name: $('#as-name', dlg).value, match: $('#as-match', dlg).value });
+      dlg.close();
+      const n = await countUnassigned();
+      if (wasEmpty && n && confirm(`Assegnare a "${rec.name}" le ${n} bollette già presenti?`)) await assignAllUnassigned(rec.id);
+      toast('Salvato'); renderSettings();
+    } catch (e) { toast(e.message, 4500); }
+  };
+}
+
+function applyEcg(c) { document.documentElement.style.setProperty('--ecg', c || '#6fe0ff'); }
 
 function openCategoryDialog() {
   const dlg = $('#dlg');
@@ -502,7 +595,7 @@ async function runAction(key) {
       if (!(await drive.isDriveEnabled())) { toast('Attiva prima "Archivia su Google Drive"'); return; }
       const { name, json } = await drive.restoreFromDrive();
       if (!confirm(`Ripristinare i dati da ${name}? I documenti già presenti non vengono duplicati.`)) return;
-      const r = await importAll(json); await loadCategories();
+      const r = await importAll(json); await loadCategories(); await loadAssets();
       toast(`Ripristino da ${name}: ${r.added} documenti recuperati, ${r.skipped} già presenti`, 7000); route();
     } else if (key === 'action.driveFree') {
       if (!(await drive.isDriveEnabled())) { toast('Attiva prima "Archivia su Google Drive"'); return; }
@@ -517,10 +610,10 @@ async function runAction(key) {
     else if (key === 'action.exportCsv') download(`billradar-${Date.now()}.csv`, billsToCSV(await listBills()), 'text/csv');
     else if (key === 'action.import') {
       const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'application/json';
-      inp.onchange = async () => { await importAll(JSON.parse(await inp.files[0].text())); toast('Backup importato'); route(); };
+      inp.onchange = async () => { await importAll(JSON.parse(await inp.files[0].text())); await loadCategories(); await loadAssets(); toast('Backup importato'); route(); };
       inp.click();
     } else if (key === 'action.wipe') {
-      if (confirm('Cancellare TUTTI i dati dal telefono? L\'operazione non è reversibile.')) { await wipeAll(); toast('Dati cancellati'); route(); }
+      if (confirm('Cancellare TUTTI i dati dal telefono? L\'operazione non è reversibile.')) { await wipeAll(); await loadCategories(); await loadAssets(); state.asset = 'all'; applyEcg(); toast('Dati cancellati'); route(); }
     }
   } catch (e) { toast(e.message, 6000); }
 }
@@ -530,7 +623,7 @@ const MESI_FULL = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
 async function renderCat(id) {
   if (!id || state.cat.id !== id) state.cat = { id, y: String(state.year), m: 'all' };
   const c = cat(id);
-  const all = (await listBills()).filter((b) => b.category === id);
+  const all = applyAsset(await listBills()).filter((b) => b.category === id);
   const ys = [...new Set(all.map((b) => (b.issueDate || '').slice(0, 4)).filter(Boolean))].sort().reverse();
   if (state.cat.y !== 'all' && !ys.includes(state.cat.y)) ys.unshift(state.cat.y);
   const { y, m } = state.cat;
@@ -543,12 +636,14 @@ async function renderCat(id) {
   view.innerHTML = `
     <a href="#/home" class="back">‹ Home</a>
     <div class="cat-head enter" style="--i:0"><div class="ico" style="background:${c.color}22">${c.icon}</div><h2>${esc(c.label)}</h2></div>
+    ${assets().length ? `<div class="enter" style="--i:1;margin-bottom:10px">${assetSelect()}</div>` : ''}
     <div class="grid2 enter" style="--i:1">
       <select id="cy" aria-label="Anno"><option value="all" ${y === 'all' ? 'selected' : ''}>Tutti gli anni</option>${ys.map((v) => `<option ${v === y ? 'selected' : ''}>${v}</option>`).join('')}</select>
       <select id="cm" aria-label="Mese"><option value="all" ${m === 'all' ? 'selected' : ''}>Tutti i mesi</option>${MESI_FULL.map((l, i) => { const v = String(i + 1).padStart(2, '0'); return `<option value="${v}" ${v === m ? 'selected' : ''}>${l}</option>`; }).join('')}</select>
     </div>
     <div class="card enter" style="--i:2"><div class="row" style="border:0"><div class="grow"><div class="t">${rows.length} document${rows.length === 1 ? 'o' : 'i'}</div><div class="s">${esc(period)}</div></div><b class="${c.kind === 'income' ? 'pos' : ''}">${eur(tot)}</b></div></div>
     <div class="card enter" style="--i:3">${rows.length ? rows.map((b) => billRow(b)).join('') : emptyState('Nessun documento', 'Nessuna bolletta in questo periodo.')}</div>`;
+  bindAssetSelect(() => renderCat(id));
   $('#cy').onchange = (e) => { state.cat.y = e.target.value; renderCat(id); };
   $('#cm').onchange = (e) => { state.cat.m = e.target.value; renderCat(id); };
   view.querySelectorAll('.row[data-id]').forEach((r) => (r.onclick = () => openBill(Number(r.dataset.id))));
@@ -635,13 +730,17 @@ async function route() {
   window.scrollTo(0, 0);
   pushWidget();   // il widget sulla Home segue i dati dell'app
 }
-view.addEventListener('click', (e) => { const a = e.target.closest('[data-filter]'); if (a) state.filter = a.dataset.filter; });
+view.addEventListener('click', (e) => { const a = e.target.closest('[data-filter]'); if (a) { state.filter = a.dataset.filter; if (a.dataset.filter === 'unassigned') state.asset = 'all'; } });
 window.addEventListener('hashchange', route);
 
 (async () => {
   $('#ver').textContent = `v${__APP_VERSION__}`;
   applyTheme(await getSetting('ui.theme'));
   await loadCategories();
+  await loadAssets();
+  applyEcg(await getSetting('ui.ecgColor'));
+  state.asset = await getKV('ui.asset', 'all');
+  if (!['all', 'none'].includes(state.asset) && !assetById(state.asset)) state.asset = 'all';
   state.hidden = new Set(await getKV('ui.hiddenSeries', []));
   const t0 = performance.now();
   await route();
