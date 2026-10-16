@@ -9,7 +9,7 @@ import { renderPdf } from './pdf.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const view = $('#view');
-const state = { year: new Date().getFullYear(), filter: 'all', q: '', statCat: 'luce', hidden: new Set(), openSet: new Set() };
+const state = { newIds: new Set(), cat: { id: null, y: 'all', m: 'all' }, year: new Date().getFullYear(), filter: 'all', q: '', statCat: 'luce', hidden: new Set(), openSet: new Set() };
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const cat = (id) => cats()[id] || { label: 'Altro', icon: '📄', color: '#888', kind: 'cost', unit: '' };
 const fmtDate = (d) => (d ? d.split('-').reverse().join('/') : '—');
@@ -71,9 +71,11 @@ function niceMax(v) {
 }
 const chartX = (m) => CH.L + ((CH.W - CH.L - CH.R) * m) / 11;
 
+let chartMax = 1;
 function lineChart(byCat, vis) {
   const { W, H, L, R, T, B } = CH;
   const max = niceMax(Math.max(1, ...vis.flatMap((id) => byCat[id] || [])));
+  chartMax = max;
   const y = (v) => T + (H - T - B) * (1 - v / max);
   let g = '';
   for (let i = 0; i <= 4; i++) {
@@ -87,9 +89,10 @@ function lineChart(byCat, vis) {
     const c = cat(id).color;
     const pts = (byCat[id] || []).map((v, m) => (v > 0 ? [chartX(m), y(v)] : null)).filter(Boolean);
     if (pts.length >= 2) g += `<path class="ln" pathLength="1" d="${smoothPath(pts)}" stroke="${c}" style="color:${c};--d:${k * 90}ms"/>`;
-    pts.forEach(([px, py]) => { g += `<circle class="pt" cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="3.4" fill="${c}" style="--d:${k * 90 + 700}ms"/>`; });
+    // niente pallini sui mesi (lettura più pulita); solo se la serie ha un unico punto, altrimenti non si vedrebbe
+    if (pts.length === 1) g += `<circle class="pt" cx="${pts[0][0].toFixed(1)}" cy="${pts[0][1].toFixed(1)}" r="3.4" fill="${c}" style="--d:${k * 90 + 700}ms"/>`;
   });
-  g += `<line class="guide" y1="${T}" y2="${H - B}" stroke="var(--acc)" stroke-width="1" visibility="hidden"/>`;
+  g += `<line class="guide" y1="${T}" y2="${H - B}" stroke="var(--acc)" stroke-width="1" visibility="hidden"/><g class="marks"></g>`;
   g += `<rect class="hit" x="${L}" y="0" width="${W - L}" height="${H}" fill="transparent"/>`;
   return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Spesa mensile per categoria">${g}</svg>`;
 }
@@ -99,7 +102,7 @@ function paintChart() {
   const box = $('#chartBox');
   if (!box || !chartCtx) return;
   const { byCat, ids, hasData } = chartCtx;
-  if (!hasData) { box.innerHTML = emptyState('Nessun dato ancora', 'Collega Gmail e tocca ⟳ per cercare le bollette.'); return; }
+  if (!hasData) { box.innerHTML = emptyState('Nessun dato ancora', 'Collega Gmail, poi "Sincronizza storico" in Impostazioni; ⟳ controlla le nuove.'); return; }
   const vis = ids.filter((id) => !state.hidden.has(id));
   box.innerHTML = `<div class="chartwrap">${lineChart(byCat, vis)}<div class="tip" hidden></div></div>
     <div class="legend">${ids.map((id) => `<button class="lg ${state.hidden.has(id) ? 'off' : ''}" data-id="${id}" aria-pressed="${!state.hidden.has(id)}"><i style="background:${cat(id).color};color:${cat(id).color}"></i>${esc(cat(id).label)}</button>`).join('')}${state.hidden.size ? '<button class="lg all" data-all>Mostra tutte</button>' : ''}</div>`;
@@ -113,7 +116,8 @@ function paintChart() {
 
   // tooltip al tocco / passaggio del mouse
   const svg = box.querySelector('svg'), tip = box.querySelector('.tip'), guide = svg.querySelector('.guide');
-  const hide = () => { tip.hidden = true; guide.setAttribute('visibility', 'hidden'); };
+  const marks = svg.querySelector('.marks');
+  const hide = () => { tip.hidden = true; guide.setAttribute('visibility', 'hidden'); marks.innerHTML = ''; };
   const show = (e) => {
     const r = svg.getBoundingClientRect();
     const px = ((e.clientX - r.left) / r.width) * CH.W;
@@ -122,6 +126,9 @@ function paintChart() {
     if (!rows.length) return hide();
     const gx = chartX(m);
     guide.setAttribute('x1', gx); guide.setAttribute('x2', gx); guide.setAttribute('visibility', 'visible');
+    // il punto compare solo sul mese toccato
+    const yv = (v) => CH.T + (CH.H - CH.T - CH.B) * (1 - v / chartMax);
+    marks.innerHTML = rows.map((id) => `<circle cx="${gx.toFixed(1)}" cy="${yv(byCat[id][m]).toFixed(1)}" r="4" fill="${cat(id).color}" stroke="var(--bg, #06121f)" stroke-width="1.5"/>`).join('');
     tip.innerHTML = `<b>${MONTH_LABELS[m]} ${state.year}</b>${rows.map((id) => `<span><i style="background:${cat(id).color}"></i>${esc(cat(id).label)}<em>${eur(byCat[id][m])}</em></span>`).join('')}`;
     tip.hidden = false;
     tip.style.left = `${Math.max(80, Math.min(r.width - 80, (gx / CH.W) * r.width))}px`;
@@ -160,8 +167,16 @@ async function renderHome() {
   const review = bills.filter((b) => b.needsReview).length;
 
   const reauth = await gmail.needsReauth();
+  const fresh = await getKV('ui.newBills', []);
+  const freshTxt = (() => {
+    const by = {};
+    fresh.forEach((x) => { by[x.category] = (by[x.category] || 0) + 1; });
+    return Object.entries(by).map(([id, n]) => `${n} ${cat(id).label}`).join(', ');
+  })();
   view.innerHTML = `
     ${reauth ? '<div class="card" style="border-color:var(--bad)"><b>Gmail non è più collegato.</b> <button class="btn" id="reauth" style="margin-top:8px;width:100%">Riconnetti Gmail</button></div>' : ''}
+    ${fresh.length ? `<div class="card notice enter" style="--i:0"><div class="nt"><span class="bell">🔔</span><div><b>${fresh.length} ${fresh.length > 1 ? 'nuove bollette' : 'nuova bolletta'}</b><div class="s">${esc(freshTxt)}</div></div></div>
+      <div class="nb"><button class="btn" id="nSee">Vedi</button><button class="btn sec" id="nOk">Ok</button></div></div>` : ''}
     <select id="yr" aria-label="Anno">${ys.map((v) => `<option ${v === state.year ? 'selected' : ''}>${v}</option>`).join('')}</select>
     <div class="grid enter" style="margin-top:12px;--i:1">
       <div class="kpi glow"><small>Spese ${state.year}</small><b data-count="${t.spese}">${eur(t.spese)}</b>
@@ -173,11 +188,16 @@ async function renderHome() {
     <div class="card enter" style="--i:2"><h3>Spesa mensile</h3><div id="chartBox"></div></div>
     <div class="card enter" style="--i:3"><h3>Per categoria</h3>${[...ids, ...(t.perCategoria.altro ? ['altro'] : [])].map((id) => {
       const v = t.perCategoria[id] || 0;
-      return `<div class="row"><div class="ico" style="background:${cat(id).color}22">${cat(id).icon}</div><div class="grow"><div class="t">${cat(id).label}</div></div><b class="${cat(id).kind === 'income' ? 'pos' : ''}" data-count="${v}">${eur(v)}</b></div>`;
+      return `<div class="row tap" data-cat="${id}" role="button" tabindex="0"><div class="ico" style="background:${cat(id).color}22">${cat(id).icon}</div><div class="grow"><div class="t">${cat(id).label}</div></div><b class="${cat(id).kind === 'income' ? 'pos' : ''}" data-count="${v}">${eur(v)}</b><span class="go">›</span></div>`;
     }).join('')}</div>
     ${next.length ? `<div class="card enter" style="--i:4"><h3>Prossime scadenze</h3>${next.slice(0, 5).map((b) => billRow(b, true)).join('')}</div>` : ''}`;
   $('#yr').onchange = (e) => { state.year = Number(e.target.value); renderHome(); };
   if (reauth) $('#reauth').onclick = () => runAction('action.connect');
+  if (fresh.length) {
+    $('#nOk').onclick = async () => { await setKV('ui.newBills', []); renderHome(); };
+    $('#nSee').onclick = async () => { state.newIds = new Set(fresh.map((x) => x.id)); state.filter = 'new'; await setKV('ui.newBills', []); location.hash = '#/docs'; };
+  }
+  view.querySelectorAll('.row[data-cat]').forEach((r) => (r.onclick = () => { state.cat = { id: r.dataset.cat, y: String(state.year), m: 'all' }; location.hash = `#/cat/${r.dataset.cat}`; }));
   view.querySelectorAll('.row[data-id]').forEach((r) => (r.onclick = () => openBill(Number(r.dataset.id))));
   chartCtx = { byCat, ids, hasData: bills.length > 0 };
   paintChart();
@@ -198,12 +218,12 @@ async function renderDocs() {
   const ids = await enabledCats();
   const f = state.filter;
   const q = state.q.toLowerCase();
-  const rows = bills.filter((b) => (f === 'all' || (f === 'review' ? b.needsReview : b.category === f))
+  const rows = bills.filter((b) => (f === 'all' || (f === 'review' ? b.needsReview : f === 'new' ? state.newIds.has(b.id) : b.category === f))
     && (!q || `${b.supplier} ${b.fileName} ${b.invoiceNumber} ${b.subject}`.toLowerCase().includes(q)));
   view.innerHTML = `
     <input type="search" id="q" placeholder="Cerca fornitore, numero…" value="${esc(state.q)}">
     <div class="chips" style="margin-top:10px">
-      ${[['all', 'Tutti'], ['review', 'Da verificare'], ...ids.map((id) => [id, cat(id).label])].map(([k, l]) => `<button class="chip ${f === k ? 'on' : ''}" data-f="${k}">${l}</button>`).join('')}
+      ${[['all', 'Tutti'], ...(state.newIds.size ? [['new', 'Nuove']] : []), ['review', 'Da verificare'], ...ids.map((id) => [id, cat(id).label])].map(([k, l]) => `<button class="chip ${f === k ? 'on' : ''}" data-f="${k}">${l}</button>`).join('')}
     </div>
     <div class="card enter" style="--i:1">${rows.length ? rows.map((b) => billRow(b)).join('') : emptyState('Nessun documento', 'Qui compariranno le bollette trovate in Gmail.')}</div>
     <button class="btn" id="add" style="width:100%">+ Aggiungi manualmente</button>`;
@@ -323,7 +343,7 @@ async function renderSettings() {
     }
     html += '</div></details>';
   }
-  view.innerHTML = html + '<p class="mut" style="text-align:center">BillRadar 0.1 · dati salvati solo su questo dispositivo</p>';
+  view.innerHTML = html + `<p class="mut" style="text-align:center">BillRadar ${__APP_VERSION__} · dati salvati solo su questo dispositivo</p>`;
 
   view.querySelectorAll('[data-s]').forEach((el) => (el.onchange = async () => {
     const val = el.type === 'checkbox' ? el.checked : el.value;
@@ -421,8 +441,10 @@ async function runAction(key) {
   try {
     if (key === 'action.connect') {
       if (await gmail.isConnected()) { await gmail.disconnect(); toast('Gmail scollegato'); }
-      else { await gmail.connect(); toast('Gmail collegato'); await doSync(); }
+      else { await gmail.connect(); toast('Gmail collegato'); await doSync('full'); }
       renderSettings();
+    } else if (key === 'action.syncHistory') {
+      await doSync('full');
     } else if (key === 'action.driveSync') {
       if (!(await drive.isDriveEnabled())) { toast('Attiva prima "Archivia su Google Drive"'); return; }
       const bar = $('#progress'); bar.hidden = false;
@@ -462,26 +484,79 @@ async function runAction(key) {
   } catch (e) { toast(e.message, 6000); }
 }
 
+// ---------- Elenco per categoria (da "Per categoria" nella Home) ----------
+const MESI_FULL = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
+async function renderCat(id) {
+  if (!id || state.cat.id !== id) state.cat = { id, y: String(state.year), m: 'all' };
+  const c = cat(id);
+  const all = (await listBills()).filter((b) => b.category === id);
+  const ys = [...new Set(all.map((b) => (b.issueDate || '').slice(0, 4)).filter(Boolean))].sort().reverse();
+  if (state.cat.y !== 'all' && !ys.includes(state.cat.y)) ys.unshift(state.cat.y);
+  const { y, m } = state.cat;
+  const rows = all.filter((b) => {
+    const d = b.issueDate || '';
+    return (y === 'all' || d.startsWith(y)) && (m === 'all' || d.slice(5, 7) === m);
+  });
+  const tot = rows.reduce((s, b) => s + (b.amount || 0), 0);
+  const period = [m === 'all' ? '' : MESI_FULL[Number(m) - 1], y === 'all' ? '' : y].filter(Boolean).join(' ') || 'tutto il periodo';
+  view.innerHTML = `
+    <a href="#/home" class="back">‹ Home</a>
+    <div class="cat-head enter" style="--i:0"><div class="ico" style="background:${c.color}22">${c.icon}</div><h2>${esc(c.label)}</h2></div>
+    <div class="grid2 enter" style="--i:1">
+      <select id="cy" aria-label="Anno"><option value="all" ${y === 'all' ? 'selected' : ''}>Tutti gli anni</option>${ys.map((v) => `<option ${v === y ? 'selected' : ''}>${v}</option>`).join('')}</select>
+      <select id="cm" aria-label="Mese"><option value="all" ${m === 'all' ? 'selected' : ''}>Tutti i mesi</option>${MESI_FULL.map((l, i) => { const v = String(i + 1).padStart(2, '0'); return `<option value="${v}" ${v === m ? 'selected' : ''}>${l}</option>`; }).join('')}</select>
+    </div>
+    <div class="card enter" style="--i:2"><div class="row" style="border:0"><div class="grow"><div class="t">${rows.length} document${rows.length === 1 ? 'o' : 'i'}</div><div class="s">${esc(period)}</div></div><b class="${c.kind === 'income' ? 'pos' : ''}">${eur(tot)}</b></div></div>
+    <div class="card enter" style="--i:3">${rows.length ? rows.map((b) => billRow(b)).join('') : emptyState('Nessun documento', 'Nessuna bolletta in questo periodo.')}</div>`;
+  $('#cy').onchange = (e) => { state.cat.y = e.target.value; renderCat(id); };
+  $('#cm').onchange = (e) => { state.cat.m = e.target.value; renderCat(id); };
+  view.querySelectorAll('.row[data-id]').forEach((r) => (r.onclick = () => openBill(Number(r.dataset.id))));
+}
+
 // ---------- sync ----------
-async function doSync() {
+/**
+ * mode:
+ *  'quick'   → all'apertura: solo le mail degli ultimi 7 giorni, senza rumore se non c'è nulla
+ *  'refresh' → tasto ⟳: solo le mail arrivate dall'ultimo controllo fino ad adesso
+ *  'full'    → "Sincronizza storico": tutto il periodo scelto nelle impostazioni
+ */
+async function doSync(mode = 'refresh') {
   const bar = $('#progress');
+  const quiet = mode === 'quick';
+  if (doSync.busy) return;
+  doSync.busy = true;
   try {
-    if (!(await gmail.isConnected())) { toast('Collega prima Gmail in Impostazioni'); location.hash = '#/settings'; return; }
-    bar.hidden = false;
+    if (!(await gmail.isConnected())) { if (!quiet) { toast('Collega prima Gmail in Impostazioni'); location.hash = '#/settings'; } return; }
+    if (!quiet) bar.hidden = false;
     $('#syncBtn').classList.add('busy');
+    const last = await getKV('gmail.lastCheck');
+    const opts = mode === 'full' ? {} : mode === 'quick' || !last ? { days: 7 } : { afterTs: last - 3600e3 };   // 1 ora di margine
     const hook = drive.syncHook();
-    const r = await gmail.sync((i, n) => { $('div', bar).style.width = `${(i / n) * 100}%`; $('span', bar).textContent = `Analizzo ${i}/${n}`; }, hook);
-    if (await getSetting('drive.autoBackup') && (await drive.isDriveEnabled())) {
+    const r = await gmail.sync((i, n) => { if (quiet) return; $('div', bar).style.width = `${(i / n) * 100}%`; $('span', bar).textContent = `Analizzo ${i}/${n}`; }, hook, opts);
+    if (r.added && (await getSetting('drive.autoBackup')) && (await drive.isDriveEnabled())) {
       try { await drive.backupToDrive(await exportAll()); } catch (e) { hook.errors.push(`backup: ${e.message}`); }
     }
-    const onDrive = hook.uploaded ? `, ${hook.uploaded} su Drive` : '';
-    toast(`Sincronizzato: ${r.added} nuovi${onDrive}, ${r.skipped} già presenti${r.errors ? `, ${r.errors} errori` : ''}${hook.errors.length ? `. Drive: ${hook.errors[0]}` : ''}`, hook.errors.length ? 9000 : 5000);
-  } catch (e) { toast(e.message, 6000); }
-  bar.hidden = true;
-  $('#syncBtn').classList.remove('busy');
+    if (r.newItems.length) {
+      // avviso in Home finché non viene chiuso: quante e di che tipo
+      const prev = await getKV('ui.newBills', []);
+      await setKV('ui.newBills', [...prev, ...r.newItems]);
+    }
+    if (!quiet || r.added || r.errors || hook.errors.length) {
+      const onDrive = hook.uploaded ? `, ${hook.uploaded} su Drive` : '';
+      const msg = mode === 'full'
+        ? `Storico sincronizzato: ${r.added} nuovi${onDrive}, ${r.skipped} già presenti`
+        : r.added ? `${r.added} ${r.added > 1 ? 'nuove bollette' : 'nuova bolletta'}${onDrive}` : 'Nessuna nuova bolletta';
+      toast(`${msg}${r.errors ? `, ${r.errors} errori` : ''}${hook.errors.length ? `. Drive: ${hook.errors[0]}` : ''}`, hook.errors.length ? 9000 : 4500);
+    }
+  } catch (e) { if (!quiet || !/non collegato/i.test(e.message)) toast(e.message, 6000); }
+  finally {
+    doSync.busy = false;
+    bar.hidden = true;
+    $('#syncBtn').classList.remove('busy');
+  }
   route();
 }
-$('#syncBtn').onclick = doSync;
+$('#syncBtn').onclick = () => doSync('refresh');
 // effetto onda al tocco sui pulsanti
 document.addEventListener('pointerdown', (e) => {
   const b = e.target.closest('.btn');
@@ -512,16 +587,17 @@ function hideSplash() {
 
 function applyTheme(t) { document.documentElement.dataset.theme = t || 'auto'; }
 async function route() {
-  const tab = (location.hash.replace('#/', '') || 'home');
-  document.querySelectorAll('.tabs a').forEach((a) => a.classList.toggle('on', a.dataset.tab === tab));
+  const [tab, arg] = (location.hash.replace('#/', '') || 'home').split('/');
+  document.querySelectorAll('.tabs a').forEach((a) => a.classList.toggle('on', a.dataset.tab === (tab === 'cat' ? 'home' : tab)));
   moveIndicator();
-  ({ home: renderHome, docs: renderDocs, stats: renderStats, settings: renderSettings }[tab] || renderHome)();
+  if (tab === 'cat') renderCat(decodeURIComponent(arg || '')); else ({ home: renderHome, docs: renderDocs, stats: renderStats, settings: renderSettings }[tab] || renderHome)();
   window.scrollTo(0, 0);
 }
 view.addEventListener('click', (e) => { const a = e.target.closest('[data-filter]'); if (a) state.filter = a.dataset.filter; });
 window.addEventListener('hashchange', route);
 
 (async () => {
+  $('#ver').textContent = `v${__APP_VERSION__}`;
   applyTheme(await getSetting('ui.theme'));
   await loadCategories();
   state.hidden = new Set(await getKV('ui.hiddenSeries', []));
@@ -531,5 +607,5 @@ window.addEventListener('hashchange', route);
   setTimeout(hideSplash, Math.max(0, (calm ? 250 : 2300) - (performance.now() - t0)));
   $('#splash')?.addEventListener('click', hideSplash);
   await gmail.keepAlive();
-  if ((await getSetting('gmail.auto')) && (await gmail.isConnected())) doSync();
+  if ((await getSetting('gmail.auto')) && (await gmail.isConnected())) doSync('quick');
 })();

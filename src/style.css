@@ -48,6 +48,8 @@ a { color: var(--acc); }
   font-weight: 700; font-size: 20px; letter-spacing: .01em; color: #e9fbff;
   text-shadow: 0 0 6px rgba(80,210,255,.9), 0 0 18px rgba(53,200,255,.55);
 }
+.brand .bt { display: flex; flex-direction: column; line-height: 1.05; }
+.brand .ver { font-size: 10.5px; letter-spacing: .08em; color: rgba(160,225,245,.7); margin-top: 2px; }
 .ecg { position: absolute; left: 0; right: 0; bottom: -1px; width: 100%; height: 10px; overflow: visible; pointer-events: none; }
 .ecg path { fill: none; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
 .ecg .base { stroke: rgba(53,200,255,.28); stroke-width: 1.2; }
@@ -235,3 +237,20 @@ svg { filter: drop-shadow(0 0 6px rgba(53,200,255,.18)); }
 .icon-btn:active { transform: scale(.9); }
 .tag2 { font-size: 10px; padding: 1px 7px; border-radius: 9px; background: var(--acc-soft); color: var(--acc); border: 1px solid var(--line); font-weight: 700; vertical-align: middle; }
 input[type=color] { width: 64px; height: 42px; padding: 3px; border-radius: 12px; }
+
+/* avviso nuove bollette */
+.notice { border-color: rgba(80,210,255,.6); box-shadow: 0 0 22px rgba(53,200,255,.22); display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.notice .nt { display: flex; gap: 10px; align-items: center; }
+.notice .bell { font-size: 24px; display: inline-block; transform-origin: 50% 0; animation: ring 2.4s ease-in-out infinite; }
+.notice .nb { display: flex; gap: 8px; }
+@keyframes ring { 0%,60%,100% { transform: rotate(0); } 66% { transform: rotate(14deg); } 72% { transform: rotate(-12deg); } 78% { transform: rotate(8deg); } 84% { transform: rotate(-5deg); } }
+@media (prefers-reduced-motion: reduce) { .notice .bell { animation: none; } }
+
+/* elenco per categoria */
+.row.tap { cursor: pointer; }
+.row .go { margin-left: 8px; opacity: .55; font-size: 20px; line-height: 1; }
+.back { display: inline-block; margin-bottom: 10px; color: var(--acc); text-decoration: none; font-weight: 600; }
+.cat-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.cat-head h2 { margin: 0; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+.cat-head .ico { width: 44px; height: 44px; border-radius: 13px; display: grid; place-items: center; font-size: 22px; }

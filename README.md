@@ -65,6 +65,13 @@ Nota: con `drive.file` l'app non riusa una cartella "BillRadar" creata a mano; n
 - **Ripristino**: "Ripristina da Drive" prende l'ultimo backup e reinserisce i documenti senza duplicare quelli già presenti. I PDF restano su Drive e si aprono da "Vedi PDF". Per ritrovare i file dopo una reinstallazione serve lo stesso Client ID.
 - **Libera spazio**: toglie dal telefono i PDF già presenti su Drive (controlla uno per uno che esistano ancora). Impostazioni → Dati mostra quanto spazio occupano i documenti.
 
+## Quando l'app cerca le bollette
+
+- **All'apertura** (se attivo in Impostazioni → Gmail): guarda solo le mail degli ultimi 7 giorni.
+- **Tasto ⟳ in alto**: controlla le sole mail arrivate dall'ultimo controllo fino ad adesso.
+- **Impostazioni → Gmail → Sincronizza storico**: cerca le bollette più vecchie nel periodo scelto (ultimi 3 mesi, 1 anno, 3 anni, tutto). Da usare la prima volta e quando vuoi recuperare arretrati.
+- Quando arrivano bollette nuove compare in Home un avviso con quante sono e di che tipo, finché non lo chiudi.
+
 ## Limiti noti
 
 - I PDF scansionati come immagine (senza testo) non vengono letti: finiscono tra i "da verificare" o vengono saltati. Non c'è OCR.

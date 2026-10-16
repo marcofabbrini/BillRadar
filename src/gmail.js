@@ -170,11 +170,20 @@ function* walkParts(part) {
 const header = (msg, name) => (msg.payload.headers.find((h) => h.name.toLowerCase() === name) || {}).value || '';
 
 /** Scarica le mail con bollette, estrae i dati dai PDF e li archivia in locale. */
-export async function sync(onProgress = () => {}, hooks = {}) {
+/**
+ * opts.afterTs → solo mail arrivate dopo quell'istante (controllo "in tempo reale");
+ * opts.days    → solo gli ultimi N giorni;
+ * nessuna opzione → storico, secondo "Periodo dello storico" nelle impostazioni.
+ */
+export async function sync(onProgress = () => {}, hooks = {}, opts = {}) {
+  const startedAt = Date.now();
   const base = await getSetting('gmail.query');
   const months = Number(await getSetting('gmail.months'));
   const keepPdf = await getSetting('parse.keepPdf');
-  const q = months ? `${base} newer_than:${months * 30}d` : base;
+  let q;
+  if (opts.afterTs) q = `${base} after:${Math.floor(opts.afterTs / 1000)}`;
+  else if (opts.days) q = `${base} newer_than:${opts.days}d`;
+  else q = months ? `${base} newer_than:${months * 30}d` : base;
 
   const ids = [];
   let pageToken;
@@ -185,7 +194,7 @@ export async function sync(onProgress = () => {}, hooks = {}) {
   } while (pageToken && ids.length < 500);
 
   const allCats = await loadCategories();
-  const stats = { messages: ids.length, added: 0, skipped: 0, errors: 0 };
+  const stats = { messages: ids.length, added: 0, skipped: 0, errors: 0, newItems: [] };
   for (let i = 0; i < ids.length; i++) {
     onProgress(i + 1, ids.length);
     try {
@@ -211,6 +220,7 @@ export async function sync(onProgress = () => {}, hooks = {}) {
         };
         const billId = await addBill(record, keepPdf ? new Blob([bytes], { type: 'application/pdf' }) : null);
         stats.added++;
+        stats.newItems.push({ id: billId, category: record.category });
         // archivio opzionale (es. Google Drive): un errore qui non interrompe la sincronizzazione
         if (hooks.onBill) await hooks.onBill(billId, bytes, record);
       }
@@ -220,5 +230,6 @@ export async function sync(onProgress = () => {}, hooks = {}) {
     }
   }
   await setKV('gmail.lastSync', Date.now());
+  await setKV('gmail.lastCheck', startedAt);   // da qui in poi il controllo rapido guarda solo le mail successive
   return stats;
 }
