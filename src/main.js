@@ -102,7 +102,7 @@ const assetOptions = (value, { all = '🏠🚗 Tutti', none = true, placeholder 
 const assetSelect = (id = 'as') => {
   if (!assets().length) return '';
   const ow = owners();
-  const ownerSel = ow.size >= 2 ? `<select id="${id}-o" aria-label="Proprietario"><option value="all">👤 Tutti i proprietari</option>${[...ow].map(([k, n]) => `<option value="${esc(k)}" ${k === state.owner ? 'selected' : ''}>👤 ${esc(n)}</option>`).join('')}</select>` : '';
+  const ownerSel = ow.size >= 2 ? `<select id="${id}-o" aria-label="Proprietario"><option value="all">👤 Tutti</option>${[...ow].map(([k, n]) => `<option value="${esc(k)}" ${k === state.owner ? 'selected' : ''}>👤 ${esc(n)}</option>`).join('')}</select>` : '';
   const sel = `<select id="${id}" aria-label="Immobile o vettura">${assetOptions(state.asset, { owned: true })}</select>`;
   return ownerSel ? `<div class="asel">${ownerSel}${sel}</div>` : sel;
 };
@@ -235,7 +235,7 @@ async function renderHome() {
     ${fresh.length ? `<div class="card notice enter" style="--i:0"><div class="nt"><span class="bell">🔔</span><div><b>${fresh.length} ${fresh.length > 1 ? 'nuove bollette' : 'nuova bolletta'}</b><div class="s">${esc(freshTxt)}</div></div></div>
       <div class="nb"><button class="btn" id="nSee">Vedi</button><button class="btn sec" id="nOk">Ok</button></div></div>` : ''}
     ${unassigned ? `<div class="card enter" style="--i:1"><b>${unassigned}</b> bollett${unassigned > 1 ? 'e' : 'a'} senza immobile o vettura <a href="#/docs" data-filter="unassigned" style="float:right">Assegna →</a></div>` : ''}
-    <div class="${assets().length ? 'grid2' : ''}" style="margin:0"><select id="yr" aria-label="Anno">${ys.map((v) => `<option ${v === state.year ? 'selected' : ''}>${v}</option>`).join('')}</select>${assetSelect()}</div>
+    <div class="${assets().length ? 'frow' : ''}" style="margin:0"><select id="yr" aria-label="Anno">${ys.map((v) => `<option ${v === state.year ? 'selected' : ''}>${v}</option>`).join('')}</select>${assetSelect()}</div>
     <div class="grid enter" style="margin-top:12px;--i:1">
       <div class="kpi glow"><small>Spese ${state.year}</small><b data-count="${t.spese}">${eur(t.spese)}</b>
         ${y.pct != null ? `<small class="${y.pct > 0 ? 'neg' : 'pos'}">${y.pct > 0 ? '▲' : '▼'} ${num(Math.abs(y.pct), 1)}% vs ${state.year - 1}</small>` : '<small>&nbsp;</small>'}</div>
