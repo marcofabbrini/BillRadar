@@ -1,6 +1,6 @@
 import './style.css';
 import { cats, loadCategories, addCategory, removeCategory, SCOPES, SCOPE_LABEL, SCOPE_ICON, needsAsset, subcats, addSubcat, removeSubcat } from './categories.js';
-import { toNum, round2, lineTotal, receiptTotals, bySubcategory } from './receipt.js';
+import { toNum, round2, bySubcategory } from './receipt.js';
 import { db, listBills, addBill, updateBill, deleteBill, exportAll, importAll, wipeAll, billsToCSV, getKV, setKV } from './db.js';
 import { SETTINGS_SCHEMA, getSetting, setSetting, allSettings } from './settings.js';
 import { eur, num, MONTH_LABELS, years, monthlyByCategory, totals, consumption, yoy, upcoming } from './stats.js';
@@ -533,8 +533,6 @@ async function openReceipt(id, newPhoto = null) {
   const b = id ? await db.bills.get(id) : { category: state.sp.c !== 'all' ? state.sp.c : 'spesa', issueDate: today(), source: 'scontrino', ownerKey: state.owner !== 'all' ? state.owner : '' };
   if (!b) return;
   let photo = newPhoto || b.photo || null, photoUrl = null;
-  const dec = (v) => (v == null ? '' : String(v).replace('.', ','));
-  const items = (b.receipt?.items || []).map((l) => ({ name: l.name || '', qty: dec(l.qty), price: dec(l.price) }));
   const dlg = $('#dlg');
   const ow = owners();
   dlg.innerHTML = `
@@ -547,12 +545,8 @@ async function openReceipt(id, newPhoto = null) {
     <label>Negozio / locale</label><input type="text" data-k="supplier" value="${esc(b.supplier || '')}" placeholder="es. Conad, Pizzeria da Gino">
     <label>Data</label><input type="date" data-k="issueDate" value="${esc(b.issueDate || today())}">
     ${ow.size ? `<label>Di chi è la spesa</label><select data-k="ownerKey"><option value="">—</option>${[...ow].map(([k, n]) => `<option value="${esc(k)}" ${k === b.ownerKey ? 'selected' : ''}>👤 ${esc(n)}</option>`).join('')}</select>` : ''}
-    <label>Righe dello scontrino <span class="s">(facoltative: il totale si calcola da solo)</span></label>
-    <div id="rc-lines"></div>
-    <button type="button" class="btn sec" id="rc-add" style="width:100%;margin-top:6px">+ Aggiungi riga</button>
-    <label>Totale scontrino (€) <span class="s">(lascia vuoto per usare la somma delle righe)</span></label>
-    <input type="text" inputmode="decimal" id="rc-total" value="${b.receipt?.manualTotal != null ? eurIn(b.receipt.manualTotal) : (!b.receipt?.items?.length && b.amount != null ? eurIn(b.amount) : '')}">
-    <div class="verdict" id="rc-sum" style="margin-top:10px"></div>
+    <label>Totale spesa (€)</label>
+    <input type="text" inputmode="decimal" id="rc-total" placeholder="0,00" value="${b.amount != null ? eurIn(b.amount) : ''}" style="font-size:22px;font-weight:700">
     <label>Note</label><input type="text" data-k="notes" value="${esc(b.notes || '')}">
     <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap"><button class="btn" id="rc-save">Salva</button>${id ? '<button class="btn danger" id="rc-del">Elimina</button>' : ''}<button class="btn sec" id="rc-close">Chiudi</button></div>`;
   dlg.showModal();
@@ -571,34 +565,18 @@ async function openReceipt(id, newPhoto = null) {
   $('#rc-file', dlg).onchange = async (e) => { const f = e.target.files[0]; if (f) { photo = await shrinkImage(f); drawPhoto(); $('#rc-pick', dlg).textContent = '📷 Cambia foto'; } };
   const un = $('#rc-unpick', dlg); if (un) un.onclick = () => { photo = null; drawPhoto(); un.remove(); $('#rc-pick', dlg).textContent = '📷 Aggiungi foto'; };
 
-  const update = () => {
-    dlg.querySelectorAll('.rline').forEach((r, i) => { r.querySelector('.lt').textContent = items[i] && toNum(items[i].price) != null ? eurIn(lineTotal(items[i])) : '—'; });
-    const t = receiptTotals(items, $('#rc-total', dlg).value);
-    $('#rc-total', dlg).placeholder = t.count ? eurIn(t.sum) : '0,00';
-    $('#rc-sum', dlg).innerHTML = `<div class="row" style="border:0;padding:0"><div class="grow">Totale<div class="s">${t.count ? `${t.count} righ${t.count === 1 ? 'a' : 'e'} · somma ${eur(t.sum)}` : 'nessuna riga: indica il totale'}</div></div><b style="font-size:22px">${eur(t.total)}</b></div>${t.manual && t.count && t.diff ? `<div class="s ${t.diff < 0 ? 'pos' : 'neg'}" style="margin-top:4px">Differenza rispetto alle righe: ${t.diff > 0 ? '+' : '−'}${eur(Math.abs(t.diff))}</div>` : ''}`;
-  };
-  const drawLines = () => {
-    $('#rc-lines', dlg).innerHTML = items.map((l, i) => `<div class="rline" data-i="${i}"><input type="text" data-f="name" placeholder="Articolo" value="${esc(l.name)}"><input type="text" inputmode="decimal" data-f="qty" placeholder="Qtà" value="${esc(l.qty)}"><input type="text" inputmode="decimal" data-f="price" placeholder="Prezzo" value="${esc(l.price)}"><span class="lt">—</span><button type="button" class="icon-btn" data-rm="${i}" aria-label="Togli riga">✕</button></div>`).join('');
-    dlg.querySelectorAll('.rline input').forEach((inp) => (inp.oninput = () => { items[Number(inp.closest('.rline').dataset.i)][inp.dataset.f] = inp.value; update(); }));
-    dlg.querySelectorAll('[data-rm]').forEach((bt) => (bt.onclick = () => { items.splice(Number(bt.dataset.rm), 1); drawLines(); }));
-    update();
-  };
-  drawLines();
-  $('#rc-add', dlg).onclick = () => { items.push({ name: '', qty: '', price: '' }); drawLines(); const ins = dlg.querySelectorAll('.rline input[data-f=name]'); ins[ins.length - 1]?.focus(); };
-  $('#rc-total', dlg).oninput = update;
+  if (!id) $('#rc-total', dlg).focus();
   $('#rc-close', dlg).onclick = () => { if (photoUrl) URL.revokeObjectURL(photoUrl); dlg.close(); };
   if (id) $('#rc-del', dlg).onclick = async () => { if (confirm('Eliminare questa spesa?')) { await deleteBill(id); dlg.close(); route(); } };
   $('#rc-save', dlg).onclick = async () => {
     const patch = {};
     dlg.querySelectorAll('[data-k]').forEach((el) => { patch[el.dataset.k] = el.value || null; });
-    const kept = items.filter((l) => toNum(l.price) != null || (l.name || '').trim());
-    const t = receiptTotals(kept, $('#rc-total', dlg).value);
-    if (!(t.total > 0)) { toast('Indica il totale o almeno una riga con il prezzo', 4000); return; }
+    const total = toNum($('#rc-total', dlg).value);
+    if (!(total > 0)) { const t = $('#rc-total', dlg); t.classList.add('invalid'); t.focus(); toast('Inserisci il totale della spesa', 3500); return; }
     Object.assign(patch, {
-      amount: t.total, unit: '', source: 'scontrino', needsReview: false, assetId: null, assetBy: null, assetNote: null, assetSuggest: null,
-      ownerKey: patch.ownerKey || '', fileName: b.fileName || 'Scontrino', photo,
-      receipt: { items: kept.map((l) => ({ name: (l.name || '').trim(), qty: toNum(l.qty), price: toNum(l.price) })), manualTotal: t.manual ? t.total : null },
-    });
+      amount: round2(total), unit: '', source: 'scontrino', needsReview: false, assetId: null, assetBy: null, assetNote: null, assetSuggest: null,
+      ownerKey: patch.ownerKey || '', fileName: b.fileName || 'Spesa', photo,
+    });   // eventuali righe di scontrini già salvati restano com'erano
     if (id) await updateBill(id, patch); else await addBill({ ...b, ...patch });
     if (photoUrl) URL.revokeObjectURL(photoUrl);
     dlg.close(); toast('Spesa salvata'); route();
