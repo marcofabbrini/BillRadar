@@ -5,11 +5,14 @@ import { SETTINGS_SCHEMA, getSetting, setSetting, allSettings } from './settings
 import { eur, num, MONTH_LABELS, years, monthlyByCategory, totals, consumption, yoy, upcoming } from './stats.js';
 import * as gmail from './gmail.js';
 import * as drive from './drive.js';
-import { renderPdf } from './pdf.js';
+import { renderPdf, pdfToText } from './pdf.js';
 import { pushWidget } from './widget.js';
 import { buildGmailQuery, invalidSenders } from './query.js';
 import { assets, assetById, assetLabel, loadAssets, saveAsset, removeAsset, countUnassigned, assignAllUnassigned, learnAssignment, reverifyBills, KIND_LABEL, KIND_ICON } from './assets.js';
 import { REASON_TEXT } from './assetmatch.js';
+import { groupContracts, analyzeBill as priceOf, priceTrend, annualUnits, compareOffer, parseOffer } from './prices.js';
+import { analyzeMany } from './priceops.js';
+import { listOffers, addOffer, updateOffer, deleteOffer } from './db.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const view = $('#view');
@@ -364,6 +367,163 @@ async function renderStats() {
   bindAssetSelect(renderStats);
   $('#cat').onchange = (e) => { state.statCat = e.target.value; renderStats(); };
   $('#yr').onchange = (e) => { state.year = Number(e.target.value); renderStats(); };
+}
+
+// ---------- Analisi prezzi ----------
+const eurU = (v) => (v == null ? '—' : new Intl.NumberFormat('it-IT', { minimumFractionDigits: 4, maximumFractionDigits: 4 }).format(v));
+const pct = (v) => `${new Intl.NumberFormat('it-IT', { maximumFractionDigits: 0 }).format(v * 100)}%`;
+const unitOf = (category) => cats()[category]?.unit || 'unità';
+const UNIT_NOTE = { gas: 'Smc = standard metro cubo, l\'unità con cui il gas viene fatturato (qui usato al posto del "mq").' };
+
+function priceSpark(pts, color) {
+  if (pts.length < 2) return '';
+  const W = 320, H = 64, pad = 8, min = Math.min(...pts.map((p) => p.price)), max = Math.max(...pts.map((p) => p.price)), span = max - min || 1;
+  const xy = pts.map((p, i) => [pad + ((W - 2 * pad) * i) / (pts.length - 1), H - pad - ((H - 2 * pad) * (p.price - min)) / span]);
+  const [lx, ly] = xy[xy.length - 1];
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Andamento del prezzo finito"><path d="${smoothPath(xy)}" fill="none" stroke="${color}" stroke-width="2.4" stroke-linecap="round"/>
+    <circle cx="${lx}" cy="${ly}" r="3.6" fill="${color}"/>
+    <text x="${pad}" y="${H - 1}" font-size="9.5" fill="currentColor" opacity=".6">${eurU(pts[0].price)}</text><text x="${W - pad}" y="${H - 1}" text-anchor="end" font-size="9.5" fill="currentColor" opacity=".6">${eurU(pts[pts.length - 1].price)}</text></svg>`;
+}
+
+function contractCard(c, i) {
+  const cc = cat(c.category), a = priceOf(c.last), tr = priceTrend(c), asset = assetById(c.assetId), u = cc.unit;
+  const period = c.last.periodFrom && c.last.periodTo ? ` · ${fmtDate(c.last.periodFrom)} – ${fmtDate(c.last.periodTo)}` : '';
+  const delta = tr.deltaPct == null ? '' : `<span class="${tr.deltaPct > 0.05 ? 'neg' : tr.deltaPct < -0.05 ? 'pos' : ''}">${tr.deltaPct > 0 ? '▲' : tr.deltaPct < 0 ? '▼' : '•'} ${num(Math.abs(tr.deltaPct), 1)}% sulla precedente</span>`;
+  const parts = a.hasBreakdown ? `<div class="stack" role="img" aria-label="Scomposizione dei costi">${a.parts.map((p) => `<i style="flex:${p.amount};background:${p.color}" title="${esc(p.label)}"></i>`).join('')}</div>
+    ${a.parts.map((p) => `<div class="row pr"><span class="catdot" style="background:${p.color}"></span><div class="grow"><div class="t">${esc(p.label)}</div><div class="s">${eur(p.amount)} · ${pct(p.share)} della bolletta</div></div><b>${eurU(p.perUnit)}<small> €/${u}</small></b></div>`).join('')}
+    ${a.exTax != null ? `<div class="hint" style="margin-top:6px">Al netto di imposte e IVA: <b>${eurU(a.exTax)} €/${u}</b></div>` : ''}`
+    : `<div class="hint" style="margin-top:8px">Nel PDF non ho trovato le voci di costo (materia prima, trasporto, oneri, imposte): vedi solo il prezzo finito.</div>`;
+  return `<div class="card enter price-card" style="--i:${i + 1}">
+    <div class="row" style="border:0;padding-top:0"><div class="ico" style="background:${cc.color}22">${cc.icon}</div>
+      <div class="grow"><div class="t">${esc(cc.label)}${c.supplier ? ` · ${esc(c.supplier)}` : ''}</div><div class="s">${asset ? esc(assetLabel(asset)) + ' · ' : ''}bolletta del ${fmtDate(c.last.issueDate)}${c.pointCode ? ` · ${esc(c.pointCode)}` : ''}</div></div></div>
+    <div class="big"><b data-count-u="${a.finished}">${eurU(a.finished)}</b><span>€/${u}</span><small>prezzo finito, tutto compreso</small></div>
+    <div class="s">${eur(a.total)} ÷ ${num(a.units, 1)} ${u}${period}</div>
+    ${UNIT_NOTE[c.category] ? `<div class="hint">${UNIT_NOTE[c.category]}</div>` : ''}
+    ${parts}
+    ${tr.pts.length > 1 ? `<div style="margin-top:12px"><div class="s">Prezzo finito nelle ultime ${tr.pts.length} bollette · ${delta}</div>${priceSpark(tr.pts, cc.color)}</div>` : ''}
+  </div>`;
+}
+
+function offerLine(o) {
+  const u = unitOf(o.category), cc = cats()[o.category];
+  return `<div class="row tap" data-offer="${o.id}" role="button" tabindex="0"><div class="ico" style="background:${(cc?.color || '#6b8497')}22">${cc?.icon || '📄'}</div>
+    <div class="grow"><div class="t">${esc(o.supplier || 'Fornitore')}${o.name ? ` · ${esc(o.name)}` : ''}${o.kind ? ` <span class="tag2">${o.kind}</span>` : ''}</div>
+    <div class="s">${o.priceUnit != null ? `${eurU(o.priceUnit)} €/${u}` : 'prezzo da inserire'}${o.fixedMonthly ? ` · ${eur(o.fixedMonthly)}/mese` : ''}${o.validUntil ? ` · valida fino al ${fmtDate(o.validUntil)}` : ''}</div></div><span class="go">›</span></div>`;
+}
+
+async function comparisonCard(c, offers, i) {
+  const cc = cat(c.category), u = cc.unit, asset = assetById(c.assetId);
+  const opts = offers.filter((o) => o.category === c.category && o.priceUnit != null);
+  if (!opts.length) return '';
+  const guess = annualUnits(c) ?? Math.round(c.last.consumption * 6);
+  const units = Number(await getKV(`price.units.${c.key}`, guess)) || guess;
+  const a = priceOf(c.last);
+  const rows = opts.map((o) => ({ o, r: compareOffer(c, o, units) })).sort((x, y) => (x.r.offerYear ?? 1e12) - (y.r.offerYear ?? 1e12));
+  const cur = rows[0]?.r.currentYear;
+  const best = rows[0];
+  const verdict = cur != null && best.r.delta != null
+    ? (best.r.delta < -0.5 ? `<div class="verdict good">La migliore offerta ti farebbe risparmiare circa <b>${eur(-best.r.delta)}</b> l'anno sulla materia prima.</div>`
+      : `<div class="verdict">Nessuna offerta caricata è più conveniente del contratto attuale.</div>`) : '';
+  return `<div class="card enter" style="--i:${i + 1}">
+    <h3>Confronto ${esc(cc.label)}${asset ? ` · ${esc(assetLabel(asset))}` : ''}</h3>
+    <label>Consumo annuo da usare (${u})</label><input type="number" inputmode="decimal" data-units="${esc(c.key)}" value="${units}" min="1">
+    <div class="hint">${annualUnits(c) != null ? 'Calcolato dalle tue bollette degli ultimi 12 mesi: puoi modificarlo.' : 'Stima dall\'ultima bolletta: correggila se conosci il consumo annuo.'}</div>
+    ${verdict}
+    <div class="cmp">
+      <div class="row pr ${cur == null ? 'mut' : ''}"><div class="grow"><div class="t">Attuale${c.supplier ? ` · ${esc(c.supplier)}` : ''}</div><div class="s">${a.materiaPerUnit != null ? `${eurU(a.materiaPerUnit)} €/${u} (materia prima, quote fisse incluse)` : 'voce "materia prima" non trovata nella bolletta'}</div></div><b>${cur != null ? eur(cur) + '<small>/anno</small>' : '—'}</b></div>
+      ${rows.map(({ o, r }, k) => `<div class="row pr ${k === 0 && r.delta != null && r.delta < -0.5 ? 'best' : ''}"><div class="grow"><div class="t">${esc(o.supplier || 'Offerta')}${o.name ? ` · ${esc(o.name)}` : ''}</div><div class="s">${eurU(o.priceUnit)} €/${u}${o.fixedMonthly ? ` + ${eur(o.fixedMonthly)}/mese` : ''}</div></div>
+        <div style="text-align:right"><b>${eur(r.offerYear)}<small>/anno</small></b>${r.delta != null ? `<div class="s ${r.delta < 0 ? 'pos' : 'neg'}">${r.delta < 0 ? '−' : '+'}${eur(Math.abs(r.delta))}</div>` : ''}</div></div>`).join('')}
+    </div>
+    <div class="hint">${cur == null ? 'Senza la voce "materia prima" della bolletta non posso confrontare: vedi solo il costo annuo di ogni offerta. ' : ''}Stima indicativa sulla sola componente materia prima: trasporto, oneri e imposte sono uguali per ogni fornitore. Dispacciamento, perdite di rete e sconti possono cambiare il risultato reale.</div>
+  </div>`;
+}
+
+async function renderPrices() {
+  view.innerHTML = '<div class="card enter">' + emptyState('Analizzo le bollette…', 'Leggo le voci di costo dall\'ultima bolletta di ogni contratto.') + '</div>';
+  const all = applyAsset(await listBills());
+  let contracts = groupContracts(all);
+  if (await analyzeMany(contracts.map((c) => c.last))) contracts = groupContracts(all);
+  const offers = await listOffers();
+
+  const cards = contracts.map(contractCard).join('');
+  const cmps = (await Promise.all(contracts.map((c, i) => comparisonCard(c, offers, contracts.length + i)))).join('');
+  view.innerHTML = `
+    ${assets().length ? `<div class="enter" style="--i:0;margin-bottom:12px">${assetSelect()}</div>` : ''}
+    <h2 style="margin:4px 0 8px">I tuoi contratti</h2>
+    ${cards || `<div class="card enter">${emptyState('Nessun contratto da analizzare', 'Servono bollette di luce, gas o acqua con il consumo indicato. Sincronizza Gmail o aggiungile dai Documenti.')}</div>`}
+    <h2 style="margin:18px 0 8px">Preventivi e contratti da confrontare</h2>
+    <div class="card enter" style="--i:${contracts.length + 1}">
+      ${offers.length ? offers.map(offerLine).join('') : '<div class="s" style="padding:6px 0">Carica un preventivo o un contratto (PDF): ne leggo prezzo e quota fissa e li confronto con le tue bollette.</div>'}
+      <button class="btn" id="offerAdd" style="width:100%;margin-top:10px">+ Carica preventivo o contratto (PDF)</button>
+      <input type="file" id="offerFile" accept="application/pdf" hidden>
+      <button class="btn sec" id="offerManual" style="width:100%;margin-top:8px">+ Inserisci offerta a mano</button>
+    </div>
+    ${cmps}`;
+  bindAssetSelect(renderPrices);
+  view.querySelectorAll('[data-offer]').forEach((r) => (r.onclick = () => openOfferDialog(Number(r.dataset.offer))));
+  $('#offerAdd').onclick = () => $('#offerFile').click();
+  $('#offerManual').onclick = () => openOfferDialog(null);
+  $('#offerFile').onchange = async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    try {
+      toast('Leggo il documento…', 2500);
+      const buf = await f.arrayBuffer();
+      const parsed = parseOffer(await pdfToText(buf.slice(0)));
+      openOfferDialog(null, { ...parsed, fileName: f.name }, new Blob([buf], { type: 'application/pdf' }));
+    } catch (err) { toast(`Documento non leggibile: ${err.message}`, 6000); }
+    e.target.value = '';
+  };
+  view.querySelectorAll('[data-units]').forEach((el) => (el.onchange = async () => { await setKV(`price.units.${el.dataset.units}`, Number(el.value) || 0); renderPrices(); }));
+  animateCountsU();
+}
+
+function animateCountsU() {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  view.querySelectorAll('[data-count-u]').forEach((el) => {
+    const target = Number(el.dataset.countU); if (!isFinite(target)) return;
+    const t0 = performance.now();
+    const tick = (now) => { const p = Math.min(1, (now - t0) / 800); el.textContent = eurU(target * (1 - Math.pow(1 - p, 3))); if (p < 1) requestAnimationFrame(tick); else el.textContent = eurU(target); };
+    requestAnimationFrame(tick);
+  });
+}
+
+async function openOfferDialog(id, prefill = null, pdf = null) {
+  const o = id ? (await listOffers()).find((x) => x.id === id) : { category: 'luce', ...(prefill || {}) };
+  if (!o) return;
+  const dlg = $('#dlg');
+  dlg.innerHTML = `
+    <h2 style="margin:0 0 4px">${id ? 'Offerta' : 'Nuova offerta'}</h2>
+    ${prefill ? '<div class="hint" style="margin-bottom:6px">Valori letti dal documento: controllali e correggili se serve.</div>' : ''}
+    <label>Tipo</label><select data-k="category"><option value="luce" ${o.category !== 'gas' ? 'selected' : ''}>⚡ Luce</option><option value="gas" ${o.category === 'gas' ? 'selected' : ''}>🔥 Gas</option></select>
+    <label>Fornitore</label><input type="text" data-k="supplier" value="${esc(o.supplier || '')}">
+    <label>Nome dell'offerta</label><input type="text" data-k="name" value="${esc(o.name || '')}">
+    <label id="pl">Prezzo della materia prima (€/${o.category === 'gas' ? 'Smc' : 'kWh'})</label><input type="number" step="0.0001" inputmode="decimal" data-k="priceUnit" value="${o.priceUnit ?? ''}">
+    <label>Quota fissa (€/mese)</label><input type="number" step="0.01" inputmode="decimal" data-k="fixedMonthly" value="${o.fixedMonthly ?? ''}">
+    <label>Tipo di prezzo</label><select data-k="kind"><option value="" ${!o.kind ? 'selected' : ''}>—</option><option value="fisso" ${o.kind === 'fisso' ? 'selected' : ''}>Fisso</option><option value="variabile" ${o.kind === 'variabile' ? 'selected' : ''}>Variabile / indicizzato</option></select>
+    <label>Valida fino al</label><input type="date" data-k="validUntil" value="${esc(o.validUntil || '')}">
+    <label>Note</label><input type="text" data-k="notes" value="${esc(o.notes || '')}" placeholder="es. sconto primo anno, bonus…">
+    <div id="pdfbox" style="margin-top:10px"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+      <button class="btn" id="of-save">Salva</button>
+      ${(o.pdf || pdf) ? '<button class="btn sec" id="of-pdf">Vedi PDF</button>' : ''}
+      ${id ? '<button class="btn danger" id="of-del">Elimina</button>' : ''}
+      <button class="btn sec" id="of-close">Chiudi</button></div>`;
+  dlg.showModal();
+  const sel = dlg.querySelector('[data-k=category]');
+  sel.onchange = () => { $('#pl', dlg).textContent = `Prezzo della materia prima (€/${sel.value === 'gas' ? 'Smc' : 'kWh'})`; };
+  $('#of-close', dlg).onclick = () => dlg.close();
+  const blob = pdf || o.pdf;
+  if (blob) $('#of-pdf', dlg).onclick = async () => renderPdf(await blob.arrayBuffer(), $('#pdfbox', dlg));
+  if (id) $('#of-del', dlg).onclick = async () => { if (confirm('Eliminare questa offerta?')) { await deleteOffer(id); dlg.close(); renderPrices(); } };
+  $('#of-save', dlg).onclick = async () => {
+    const patch = {};
+    dlg.querySelectorAll('[data-k]').forEach((el) => {
+      patch[el.dataset.k] = el.type === 'number' ? (el.value === '' ? null : Number(el.value)) : (el.value || null);
+    });
+    if (patch.priceUnit == null || patch.priceUnit <= 0) { toast('Inserisci il prezzo della materia prima', 4000); return; }
+    if (id) await updateOffer(id, patch); else await addOffer({ ...patch, fileName: prefill?.fileName || null }, pdf);
+    dlg.close(); toast('Offerta salvata'); renderPrices();
+  };
 }
 
 // ---------- Impostazioni ----------
@@ -747,7 +907,7 @@ async function route() {
   const [tab, arg] = (location.hash.replace('#/', '') || 'home').split('/');
   document.querySelectorAll('.tabs a').forEach((a) => a.classList.toggle('on', a.dataset.tab === (tab === 'cat' ? 'home' : tab)));
   moveIndicator();
-  if (tab === 'cat') renderCat(decodeURIComponent(arg || '')); else ({ home: renderHome, docs: renderDocs, stats: renderStats, settings: renderSettings }[tab] || renderHome)();
+  if (tab === 'cat') renderCat(decodeURIComponent(arg || '')); else ({ home: renderHome, docs: renderDocs, stats: renderStats, prices: renderPrices, settings: renderSettings }[tab] || renderHome)();
   window.scrollTo(0, 0);
   pushWidget();   // il widget sulla Home segue i dati dell'app
 }

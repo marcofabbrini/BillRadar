@@ -226,7 +226,7 @@ export async function sync(onProgress = () => {}, hooks = {}, opts = {}) {
           issueDate: fields.issueDate || mailDate,
           ...assignmentFields(assignAsset({ text, category: fields.category, supplier: fields.supplier, holder: fields.holder, supplyAddress: fields.supplyAddress }, allAssets, rules)),
           messageId: msg.id, attachmentId: p.body.attachmentId,
-          fileName: p.filename, subject, from, source: 'gmail',
+          fileName: p.filename, subject, from, source: 'gmail', analyzed: true,
         };
         const billId = await addBill(record, keepPdf ? new Blob([bytes], { type: 'application/pdf' }) : null);
         stats.added++;

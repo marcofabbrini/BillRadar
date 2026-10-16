@@ -104,6 +104,12 @@ Sotto i campi vedi la ricerca Gmail che ne risulta. Solo le mail con un PDF alle
 - **Impostazioni → Gmail → Sincronizza storico**: cerca le bollette più vecchie nel periodo scelto (ultimi 3 mesi, 1 anno, 3 anni, tutto). Da usare la prima volta e quando vuoi recuperare arretrati.
 - Quando arrivano bollette nuove compare in Home un avviso con quante sono e di che tipo, finché non lo chiudi.
 
+## Analisi prezzi
+
+La scheda **Prezzi** mostra, per l'ultima bolletta di ogni contratto (riconosciuto da POD/PDR, altrimenti da tipo, immobile e fornitore), il **prezzo finito**: totale della bolletta diviso i consumi, in €/kWh per la luce e €/Smc per il gas (Smc = standard metro cubo, l'unità con cui il gas è fatturato). Se nel PDF ci sono le voci ARERA, il prezzo è scomposto in materia prima, trasporto, oneri di sistema, imposte e IVA, con andamento sulle ultime bollette.
+
+Nella stessa scheda puoi caricare **preventivi e contratti** (PDF): l'app legge prezzo, quota fissa e validità, tu controlli e correggi i valori, poi li confronta con il costo annuo del contratto attuale. Il confronto riguarda solo la componente *materia prima* (il resto è uguale per ogni fornitore) e usa il consumo annuo calcolato dalle tue bollette, modificabile. Le offerte entrano nel backup JSON (i PDF restano sul telefono).
+
 ## Widget
 
 Tieni premuto sulla Home di Android → **Widget** → BillRadar "Andamento bollette". Alla creazione scegli quali serie mostrare (poi: tieni premuto il widget → Impostazioni). Si ridimensiona liberamente, anche a tutta larghezza; mostra l'andamento degli ultimi 12 mesi e un indicatore con le bollette nuove degli ultimi 7 giorni. Si aggiorna quando apri l'app o sincronizzi.

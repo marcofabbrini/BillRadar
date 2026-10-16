@@ -6,6 +6,12 @@ db.version(1).stores({
   bills: '++id, category, issueDate, messageId, [messageId+attachmentId], source',
   kv: 'key',
 });
+// v2: preventivi e contratti da confrontare ("Analisi prezzi")
+db.version(2).stores({
+  bills: '++id, category, issueDate, messageId, [messageId+attachmentId], source',
+  kv: 'key',
+  offers: '++id, category, createdAt',
+});
 
 export async function getKV(key, fallback = null) {
   const row = await db.kv.get(key);
@@ -26,13 +32,20 @@ export const listBills = () => db.bills.orderBy('issueDate').reverse().toArray()
 export const updateBill = (id, patch) => db.bills.update(id, patch);
 export const deleteBill = (id) => db.bills.delete(id);
 
+export const listOffers = () => db.offers.orderBy('createdAt').reverse().toArray();
+export const addOffer = (o, pdf = null) => db.offers.add({ ...o, pdf: pdf || null, createdAt: Date.now() });
+export const updateOffer = (id, patch) => db.offers.update(id, patch);
+export const deleteOffer = (id) => db.offers.delete(id);
+
 export async function exportAll() {
   const bills = await db.bills.toArray();
+  const offers = await db.offers.toArray();
   const kv = await db.kv.toArray();
   return {
     app: 'BillRadar', version: 1, exportedAt: new Date().toISOString(),
     // i PDF non vengono inclusi nel JSON (solo i dati estratti)
     bills: bills.map(({ pdf, ...rest }) => rest),
+    offers: offers.map(({ pdf, ...rest }) => rest),   // solo i dati: i PDF dei preventivi restano sul telefono
     settings: kv.filter((r) => !r.key.startsWith('gmail.') && !r.key.startsWith('drive.')),
   };
 }
@@ -46,12 +59,18 @@ export async function importAll(json) {
       || (rest.driveFileId && !!(await db.bills.filter((x) => x.driveFileId === rest.driveFileId).first()));
     if (dup) skipped++; else { await db.bills.add(rest); added++; }
   }
+  for (const o of json.offers || []) {
+    const { id, ...rest } = o;
+    const dup = await db.offers.filter((x) => x.supplier === rest.supplier && x.name === rest.name && x.priceUnit === rest.priceUnit && x.category === rest.category).first();
+    if (!dup) await db.offers.add(rest);
+  }
   for (const r of json.settings || []) await db.kv.put(r);
   return { added, skipped };
 }
 
 export async function wipeAll() {
   await db.bills.clear();
+  await db.offers.clear();
   await db.kv.clear();
 }
 

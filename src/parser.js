@@ -162,6 +162,45 @@ export function extractSupplier(text) {
   return m ? m[1].trim() : null;
 }
 
+/** Codice del punto di fornitura: POD (luce) o PDR (gas). Identifica il contratto. */
+export function extractPointCode(text) {
+  const t = norm(text);
+  const pod = t.match(/\bIT\s?\d{3}\s?E\s?[A-Z0-9]{8,10}\b/i);
+  if (pod) return pod[0].replace(/\s/g, '').toUpperCase();
+  const pdr = t.match(/(?:\bPDR\b|punto di riconsegna)[^\d\n]{0,25}(\d{14})\b/i);
+  return pdr ? pdr[1] : null;
+}
+
+const money = (s) => { const m = String(s).match(/\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2}/g); return m ? m.map(parseNumberIT) : []; };
+
+/**
+ * Le quattro macro-voci della bolletta ARERA: materia (energia/gas), trasporto e contatore, oneri di sistema,
+ * imposte e IVA. Per ogni voce prende l'ultimo importo della riga (o, in mancanza, il primo della riga dopo).
+ * Restituisce solo quelle trovate; null se non ne trova nessuna o se la somma è incoerente con il totale.
+ */
+export function extractBreakdown(text, total = null) {
+  const lines = norm(text).split('\n');
+  const defs = {
+    materia: /spesa per la materia|spesa materia|materia (?:energia|gas)/i,
+    trasporto: /spesa per il trasporto|trasporto e gestione del contatore/i,
+    oneri: /spesa per oneri di sistema|oneri di sistema/i,
+    imposte: /(?:totale )?imposte e i\.?v\.?a\.?|totale imposte/i,
+  };
+  const out = {};
+  for (const [k, re] of Object.entries(defs)) {
+    for (let i = 0; i < lines.length; i++) {
+      if (!re.test(lines[i])) continue;
+      const label = lines[i].replace(/\([^)]*\)/g, '');           // toglie le date tra parentesi
+      let vals = money(label);
+      if (!vals.length && lines[i + 1]) vals = money(lines[i + 1]).slice(0, 1);
+      if (vals.length) { out[k] = vals[vals.length - 1]; break; }
+    }
+  }
+  const sum = Object.values(out).reduce((a, b) => a + b, 0);
+  if (!Object.keys(out).length || (total && sum > total * 1.05)) return null;
+  return out;
+}
+
 /** Intestatario del contratto, se indicato nel documento (etichetta + valore sulla stessa riga o su quella dopo). */
 export function extractHolder(text) {
   const t = norm(text);
@@ -207,6 +246,7 @@ export function parseBill(text, { subject = '', from = '', cats = CATEGORIES } =
     issueDate: issue, dueDate: due,
     supplier, invoiceNumber,
     holder: extractHolder(clean), supplyAddress: extractAddress(clean),
+    pointCode: extractPointCode(clean), breakdown: extractBreakdown(clean, amount),
     confidence: Math.round(conf * 100) / 100,
     needsReview: conf < 0.7 || amount == null,
     scores,
