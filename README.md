@@ -30,7 +30,15 @@ L'app usa il login Google nel browser di sistema (OAuth + PKCE, sola lettura `gm
    - se presente, attiva *"Abilita schema URI personalizzato"* nelle impostazioni avanzate.
 5. Copia il Client ID in **App → Impostazioni → Gmail → Google OAuth Client ID**, poi tocca **Collega Gmail**.
 
-In stato *Test* Google mostra l'avviso "app non verificata" e il token scade dopo 7 giorni: basta ricollegare. Per evitarlo, pubblica l'app nella schermata di consenso (resta per uso personale).
+### Collegamento permanente
+
+Il collegamento resta attivo da solo (l'app rinnova il token a ogni apertura), **ma solo se la schermata di consenso è in produzione**:
+
+1. Google Cloud Console → **Schermata consenso OAuth** (o *Google Auth Platform → Pubblico*).
+2. Premi **Pubblica app** / *Passa a produzione*. Non serve la verifica Google per uso personale.
+3. Al primo login vedrai "Google non ha verificato questa app": **Avanzate → Vai a BillRadar (non sicuro)** e consenti. Succede una volta sola.
+
+Se la lasci in *Test*, Google fa scadere il collegamento dopo 7 giorni. Se capita (o se revochi l'accesso), la Home mostra il pulsante **Riconnetti Gmail**: un tocco e riparte, senza perdere i dati.
 
 ## Limiti noti
 

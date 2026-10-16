@@ -63,7 +63,9 @@ async function renderHome() {
   const next = upcoming(bills);
   const review = bills.filter((b) => b.needsReview).length;
 
+  const reauth = await gmail.needsReauth();
   view.innerHTML = `
+    ${reauth ? '<div class="card" style="border-color:var(--bad)"><b>Gmail non è più collegato.</b> <button class="btn" id="reauth" style="margin-top:8px;width:100%">Riconnetti Gmail</button></div>' : ''}
     <select id="yr" aria-label="Anno">${ys.map((v) => `<option ${v === state.year ? 'selected' : ''}>${v}</option>`).join('')}</select>
     <div class="grid" style="margin-top:12px">
       <div class="kpi"><small>Spese ${state.year}</small><b>${eur(t.spese)}</b>
@@ -80,6 +82,7 @@ async function renderHome() {
     }).join('')}</div>
     ${next.length ? `<div class="card"><h3>Prossime scadenze</h3>${next.slice(0, 5).map((b) => billRow(b, true)).join('')}</div>` : ''}`;
   $('#yr').onchange = (e) => { state.year = Number(e.target.value); renderHome(); };
+  if (reauth) $('#reauth').onclick = () => runAction('action.connect');
   view.querySelectorAll('.row[data-id]').forEach((r) => (r.onclick = () => openBill(Number(r.dataset.id))));
 }
 
@@ -189,7 +192,7 @@ async function renderSettings() {
       else if (it.type === 'text') html += `<div style="padding:10px 0;border-bottom:1px solid var(--line)"><div>${it.label}</div>${hint}<input type="text" data-s="${it.key}" value="${esc(v)}" style="margin-top:6px"></div>`;
       else if (it.type === 'select') html += `<div class="set-item"><div>${it.label}</div><select data-s="${it.key}" style="width:auto">${it.options.map(([k, l]) => `<option value="${k}" ${String(v) === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>`;
       else if (it.type === 'action') {
-        const label = it.key === 'action.connect' ? (connected ? 'Scollega Gmail' : 'Collega Gmail') : it.label;
+        const label = it.key === 'action.connect' ? (connected ? 'Scollega Gmail' : (await gmail.needsReauth()) ? 'Riconnetti Gmail' : 'Collega Gmail') : it.label;
         html += `<div class="set-item"><div>${it.label}${it.key === 'action.connect' ? `<div class="hint">${connected ? 'Collegato' : 'Non collegato'}${last ? ' · ultimo sync ' + new Date(last).toLocaleString('it-IT') : ''}</div>` : ''}</div><button class="btn ${it.danger ? 'danger' : 'sec'}" data-a="${it.key}">${it.key === 'action.connect' ? label : 'Esegui'}</button></div>`;
       } else html += `<div class="set-item mut">${it.label}</div>`;
     }
@@ -257,5 +260,6 @@ window.addEventListener('hashchange', route);
 (async () => {
   applyTheme(await getSetting('ui.theme'));
   await route();
+  await gmail.keepAlive();
   if ((await getSetting('gmail.auto')) && (await gmail.isConnected())) doSync();
 })();

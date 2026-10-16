@@ -30,7 +30,11 @@ export async function isConnected() {
   const t = await getKV('gmail.tokens');
   return !!(t && (t.refresh || t.access));
 }
-export async function disconnect() { await setKV('gmail.tokens', null); }
+export async function disconnect() {
+  await setKV('gmail.tokens', null);
+  await setKV('gmail.needsReauth', false);
+}
+export const needsReauth = async () => !!(await getKV('gmail.needsReauth'));
 
 async function tokenRequest(params) {
   const clientId = await getSetting('gmail.clientId');
@@ -40,7 +44,11 @@ async function tokenRequest(params) {
     body: new URLSearchParams({ client_id: clientId, ...params }),
   });
   const j = await r.json();
-  if (!r.ok) throw new Error(j.error_description || j.error || 'Errore di autenticazione');
+  if (!r.ok) {
+    const e = new Error(j.error_description || j.error || 'Errore di autenticazione');
+    e.code = j.error;
+    throw e;
+  }
   return j;
 }
 
@@ -74,6 +82,13 @@ export async function connect() {
 
   const tokens = await tokenRequest({ code, code_verifier: verifier, grant_type: 'authorization_code', redirect_uri: REDIRECT_URI });
   await saveTokens(tokens);
+  await setKV('gmail.needsReauth', false);
+}
+
+/** Rinnova il token in background all'apertura dell'app, così il collegamento resta attivo. */
+export async function keepAlive() {
+  if (!(await isConnected())) return;
+  try { await accessToken(); } catch { /* il banner "Riconnetti" gestisce il caso */ }
 }
 
 async function accessToken() {
@@ -81,9 +96,19 @@ async function accessToken() {
   if (!t) throw new Error('Account Gmail non collegato');
   if (t.access && t.expires > Date.now()) return t.access;
   if (!t.refresh) throw new Error('Sessione scaduta: ricollega Gmail');
-  const j = await tokenRequest({ grant_type: 'refresh_token', refresh_token: t.refresh });
-  await saveTokens(j);
-  return j.access_token;
+  try {
+    const j = await tokenRequest({ grant_type: 'refresh_token', refresh_token: t.refresh });
+    await saveTokens(j);
+    return j.access_token;
+  } catch (e) {
+    // token revocato o scaduto: serve un nuovo consenso (un solo tocco)
+    if (e.code === 'invalid_grant') {
+      await setKV('gmail.tokens', null);
+      await setKV('gmail.needsReauth', true);
+      throw new Error('Sessione Gmail scaduta: tocca "Riconnetti Gmail"');
+    }
+    throw e;
+  }
 }
 
 async function gget(path, params) {
