@@ -312,3 +312,5 @@ select.invalid { border-color: var(--bad); box-shadow: 0 0 0 3px rgba(255,90,90,
 .rline input { padding: 9px 8px; font-size: 14px; min-width: 0; }
 .rline .lt { text-align: right; font-size: 13px; font-weight: 600; }
 .rline .icon-btn { padding: 0; }
+
+.choice input { margin-top: 6px; }

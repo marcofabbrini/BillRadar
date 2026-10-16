@@ -307,6 +307,31 @@ async function renderDocs() {
 
 const scopeOf = (category) => (cats()[category] ? (cats()[category].scope || 'home') : null);
 
+/** Scelta tra i valori configurati (intestatari, indirizzi degli immobili); "Altro…" per scrivere a mano. */
+function choiceField(k, label, values, current) {
+  current = (current || '').trim();
+  const known = values.includes(current);
+  return `<div class="choice" data-choice="${k}"><label>${label}</label>
+    <select data-pick="${k}"><option value="">—</option>${values.map((v) => `<option value="${esc(v)}" ${v === current ? 'selected' : ''}>${esc(v)}</option>`).join('')}
+      ${current && !known ? `<option value="${esc(current)}" selected>📄 Dal documento: ${esc(current)}</option>` : ''}<option value="__other">✏️ Altro…</option></select>
+    <input type="text" data-k="${k}" value="${esc(current)}" placeholder="Scrivi a mano" hidden></div>`;
+}
+function bindChoice(root) {
+  root.querySelectorAll('[data-pick]').forEach((sel) => {
+    const inp = root.querySelector(`input[data-k=${sel.dataset.pick}]`);
+    sel.onchange = () => {
+      if (sel.value === '__other') { inp.hidden = false; inp.value = ''; inp.focus(); } else { inp.hidden = true; inp.value = sel.value; }
+    };
+  });
+}
+/** Imposta una scelta (se il valore non è nell'elenco, lo aggiunge come "dal documento"). */
+function setChoice(root, k, value) {
+  const sel = root.querySelector(`[data-pick=${k}]`), inp = root.querySelector(`input[data-k=${k}]`);
+  if (!sel || !value) return;
+  if (![...sel.options].some((o) => o.value === value)) return;
+  sel.value = value; inp.value = value; inp.hidden = true;
+}
+
 async function openBill(id) {
   if (id && (await db.bills.get(id))?.source === 'scontrino') return openReceipt(id);
   const b = id ? await db.bills.get(id) : { category: 'luce', issueDate: new Date().toISOString().slice(0, 10), source: 'manuale' };
@@ -322,7 +347,7 @@ async function openBill(id) {
     <select data-k="assetId" id="assetSel">${assetOptions(b.assetId || b.assetSuggest || (id ? '' : (assetById(state.asset) ? state.asset : '')), { only: scopeOf(b.category), placeholder: assets().length ? '— scegli a cosa si riferisce —' : '— nessuno: aggiungilo in Impostazioni —' })}</select>
     ${!b.assetId && b.assetNote ? `<div class="hint" style="color:var(--warn,#ffb938);margin-top:6px">${esc(REASON_TEXT[b.assetNote] || '')}${b.assetSuggest ? ` Suggerito: ${esc(assetLabel(assetById(b.assetSuggest)))} (intestatario coincidente): controlla e conferma.` : ''}</div>` : ''}
     </div>
-    ${field('holder', 'Intestatario (dal documento)')}${field('supplyAddress', 'Indirizzo fornitura (dal documento)')}
+    ${choiceField('holder', 'Intestatario', [...owners().values()], b.holder)}${choiceField('supplyAddress', 'Indirizzo di fornitura', [...new Set(assets().filter((a) => a.kind === 'home' && a.address).map((a) => a.address))], b.supplyAddress)}
     ${field('supplier', 'Fornitore')}${field('amount', 'Importo (€)', 'number')}${field('consumption', 'Consumo', 'number')}
     ${field('issueDate', 'Data documento', 'date')}${field('periodFrom', 'Periodo da', 'date')}${field('periodTo', 'Periodo a', 'date')}
     ${field('dueDate', 'Scadenza', 'date')}${field('invoiceNumber', 'Numero documento')}
@@ -339,6 +364,12 @@ async function openBill(id) {
   // cambiando categoria si propongono solo immobili (luce, gas…) o solo vetture (bollo, carburante…)
   const catSel = dlg.querySelector('[data-k=category]'), astSel = $('#assetSel', dlg);
   const ph = astSel.options[0]?.value === '' ? astSel.options[0].textContent : '— scegli a cosa si riferisce —';
+  bindChoice(dlg);
+  // scegliendo l'immobile (o la vettura) si propongono i suoi indirizzo e intestatario: restano modificabili
+  astSel.addEventListener('change', () => {
+    const a = assetById(astSel.value);
+    if (a) { setChoice(dlg, 'holder', a.holder); setChoice(dlg, 'supplyAddress', a.address); }
+  });
   const refreshSub = bindSub(dlg, () => catSel.value);
   catSel.onchange = () => {
     const sc = scopeOf(catSel.value);
