@@ -42,6 +42,22 @@ export const CATEGORIES = {
     label: 'Ricarica', icon: '🔌', unit: 'kWh', color: '#1fb5a6', kind: 'cost', scope: 'car',
     keywords: ['ricarica', 'colonnina', 'wallbox', 'supercharger', 'enel x way', 'be charge', 'ricarica elettrica', 'veicolo elettrico'],
   },
+  spesa: {
+    label: 'Spesa', icon: '🛒', unit: '', color: '#7cb342', kind: 'cost', scope: 'exp',
+    keywords: ['supermercato', 'alimentari', 'esselunga', 'conad', 'coop ', 'carrefour', 'lidl', 'eurospin', 'iper ', 'pam panorama', 'ortofrutta', 'macelleria', 'panificio'],
+  },
+  ristoranti: {
+    label: 'Ristoranti', icon: '🍽️', unit: '', color: '#e0576f', kind: 'cost', scope: 'exp',
+    keywords: ['ristorante', 'pizzeria', 'trattoria', 'osteria', 'coperto', 'sushi', 'braceria', 'tavola calda'],
+  },
+  informatica: {
+    label: 'Spese informatica', icon: '💻', unit: '', color: '#5c6bc0', kind: 'cost', scope: 'exp',
+    keywords: ['informatica', 'hardware', 'software', 'notebook', 'mediaworld', 'unieuro', 'licenza software', 'hosting', 'dominio web', 'cloud storage'],
+  },
+  altrespese: {
+    label: 'Altre spese', icon: '🧾', unit: '', color: '#90a4ae', kind: 'cost', scope: 'exp',
+    keywords: [],
+  },
   gse: {
     label: 'Acconti GSE', icon: '☀️', unit: 'kWh', color: '#22a06b', kind: 'income', scope: 'home',
     keywords: ['gse', 'gestore dei servizi energetici', 'ritiro dedicato', 'scambio sul posto', 'acconto', 'contributo in conto scambio', 'fotovoltaico', 'impianto fv', 'energia immessa'],

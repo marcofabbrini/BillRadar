@@ -108,6 +108,12 @@ Sotto i campi vedi la ricerca Gmail che ne risulta. Solo le mail con un PDF alle
 
 Ogni categoria è riferita a immobili o a vetture. **Immobili:** Luce, Gas, Acqua, Internet/Telefono, Acconti GSE. **Vetture:** Bollo, Manutenzione, Tagliando, Carburante, Assicurazione, Ricarica. Nel dettaglio di un documento, scegliendo la categoria l'elenco "Immobile / vettura" mostra solo i beni coerenti, e l'assegnazione automatica non abbina mai una bolletta di casa a un'auto o viceversa. Le categorie create da te hanno il campo "Si riferisce a" (immobili o vetture).
 
+## Spese personali e scontrini
+
+Oltre a immobili e vetture ci sono le **spese personali**, che non richiedono nessun immobile o vettura: **Spesa**, **Ristoranti**, **Spese informatica**, **Altre spese**. Per ognuna puoi creare le **sottocategorie** che vuoi (Impostazioni → Categorie → 🏷, oppure dal ＋ quando registri una spesa). Le categorie create da te possono essere "Spese personali" dal campo "Si riferisce a".
+
+La scheda **Spese** serve a registrare gli scontrini: foto (ridotta a max 1600 px per risparmiare spazio), negozio, data, categoria e sottocategoria, e le righe con quantità e prezzo. Importo di riga e totale si calcolano da soli; se scrivi tu il totale (sconti, arrotondamenti) l'app mostra la differenza rispetto alle righe. L'elenco si filtra per anno, mese e categoria, con totali per categoria e per sottocategoria. Il proprietario si sceglie sulla singola spesa. Le foto e i PDF restano sul telefono (non entrano nel backup JSON, che contiene i dati delle spese). L'app non legge ancora il testo della foto: i valori si inseriscono a mano.
+
 ## Analisi prezzi
 
 La scheda **Prezzi** mostra, per l'ultima bolletta di ogni contratto (riconosciuto da POD/PDR, altrimenti da tipo, immobile e fornitore), il **prezzo finito**: totale della bolletta diviso i consumi, in €/kWh per la luce e €/Smc per il gas (Smc = standard metro cubo, l'unità con cui il gas è fatturato). Se nel PDF ci sono le voci ARERA, il prezzo è scomposto in materia prima, trasporto, oneri di sistema, imposte e IVA, con andamento sulle ultime bollette.

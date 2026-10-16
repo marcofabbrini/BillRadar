@@ -1,5 +1,6 @@
 import './style.css';
-import { cats, loadCategories, addCategory, removeCategory } from './categories.js';
+import { cats, loadCategories, addCategory, removeCategory, SCOPES, SCOPE_LABEL, SCOPE_ICON, needsAsset, subcats, addSubcat, removeSubcat } from './categories.js';
+import { toNum, round2, lineTotal, receiptTotals, bySubcategory } from './receipt.js';
 import { db, listBills, addBill, updateBill, deleteBill, exportAll, importAll, wipeAll, billsToCSV, getKV, setKV } from './db.js';
 import { SETTINGS_SCHEMA, getSetting, setSetting, allSettings } from './settings.js';
 import { eur, num, MONTH_LABELS, years, monthlyByCategory, totals, consumption, yoy, upcoming } from './stats.js';
@@ -16,7 +17,7 @@ import { listOffers, addOffer, updateOffer, deleteOffer } from './db.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const view = $('#view');
-const state = { asset: 'all', owner: 'all', newIds: new Set(), cat: { id: null, y: 'all', m: 'all' }, year: new Date().getFullYear(), filter: 'all', q: '', statCat: 'luce', hidden: new Set(), openSet: new Set() };
+const state = { sp: { y: String(new Date().getFullYear()), m: String(new Date().getMonth() + 1).padStart(2, '0'), c: 'all' }, asset: 'all', owner: 'all', newIds: new Set(), cat: { id: null, y: 'all', m: 'all' }, year: new Date().getFullYear(), filter: 'all', q: '', statCat: 'luce', hidden: new Set(), openSet: new Set() };
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const cat = (id) => cats()[id] || { label: 'Altro', icon: '📄', color: '#888', kind: 'cost', unit: '' };
 const fmtDate = (d) => (d ? d.split('-').reverse().join('/') : '—');
@@ -83,10 +84,14 @@ const chartX = (m) => CH.L + ((CH.W - CH.L - CH.R) * m) / 11;
 const ownerKey = (h) => String(h || '').trim().toLowerCase().replace(/\s+/g, ' ');
 const owners = () => { const m = new Map(); for (const a of assets()) { const k = ownerKey(a.holder); if (k && !m.has(k)) m.set(k, a.holder.trim()); } return m; };
 const ownedBy = (a) => !!a && (state.owner === 'all' || ownerKey(a.holder) === state.owner);
-const applyAsset = (bills) => {
+// una spesa personale non ha un bene: il proprietario si sceglie sulla spesa stessa (ownerKey)
+const applyOwner = (bills) => {
   if (state.owner !== 'all' && !owners().has(state.owner)) state.owner = 'all';   // proprietario non più presente
-  if (state.owner !== 'all') bills = bills.filter((b) => ownedBy(assetById(b.assetId)));
-  return state.asset === 'all' ? bills : state.asset === 'none' ? bills.filter((b) => !b.assetId) : bills.filter((b) => b.assetId === state.asset);
+  return state.owner === 'all' ? bills : bills.filter((b) => (b.assetId ? ownedBy(assetById(b.assetId)) : b.ownerKey === state.owner));
+};
+const applyAsset = (bills) => {
+  bills = applyOwner(bills);
+  return state.asset === 'all' ? bills : state.asset === 'none' ? bills.filter((b) => !b.assetId && needsAsset(b)) : bills.filter((b) => b.assetId === state.asset);
 };
 const assetOptions = (value, { all = '🏠🚗 Tutti', none = true, placeholder = null, only = null, owned = false } = {}) => {
   const grp = (kind, label) => {
@@ -97,6 +102,15 @@ const assetOptions = (value, { all = '🏠🚗 Tutti', none = true, placeholder 
   return (placeholder ? `<option value="">${placeholder}</option>` : `<option value="all" ${value === 'all' ? 'selected' : ''}>${all}</option>`)
     + grp('home', 'Immobili') + grp('car', 'Vetture')
     + (none && !placeholder ? `<option value="none" ${value === 'none' ? 'selected' : ''}>Senza assegnazione</option>` : '');
+};
+async function setOwner(v) {
+  state.owner = v; await setKV('ui.owner', v);
+  // il bene scelto resta solo se appartiene al proprietario; "senza assegnazione" non ha proprietario
+  if (state.asset === 'none' || (assetById(state.asset) && !ownedBy(assetById(state.asset)))) { state.asset = 'all'; await setKV('ui.asset', 'all'); }
+}
+const ownerSelect = (id = 'so') => {
+  const ow = owners();
+  return ow.size >= 2 ? `<select id="${id}" aria-label="Proprietario"><option value="all">👤 Tutti</option>${[...ow].map(([k, n]) => `<option value="${esc(k)}" ${k === state.owner ? 'selected' : ''}>👤 ${esc(n)}</option>`).join('')}</select>` : '';
 };
 /** Selettore del bene (mostrato solo se ne esiste almeno uno). */
 const assetSelect = (id = 'as') => {
@@ -109,14 +123,10 @@ const assetSelect = (id = 'as') => {
 const bindAssetSelect = (rerender, id = 'as') => {
   const el = $(`#${id}`), eo = $(`#${id}-o`);
   if (el) el.onchange = async (e) => { state.asset = e.target.value; await setKV('ui.asset', state.asset); rerender(); };
-  if (eo) eo.onchange = async (e) => {
-    state.owner = e.target.value; await setKV('ui.owner', state.owner);
-    // il bene scelto resta solo se appartiene al proprietario; "senza assegnazione" non ha proprietario
-    if (state.asset === 'none' || (assetById(state.asset) && !ownedBy(assetById(state.asset)))) { state.asset = 'all'; await setKV('ui.asset', 'all'); }
-    rerender();
-  };
+  if (eo) eo.onchange = async (e) => { await setOwner(e.target.value); rerender(); };
 };
 const assetTag = (b) => {
+  if (!needsAsset(b)) return b.subcategory ? `<span class="tag2">${esc(b.subcategory)}</span>` : '';
   if (!assets().length) return '';
   const a = assetById(b.assetId);
   return a ? `<span class="tag2">${esc(assetLabel(a))}</span>` : '<span class="tag">da assegnare</span>';
@@ -214,7 +224,7 @@ async function enabledCats() {
 async function renderHome() {
   const allBills = await listBills();
   const bills = applyAsset(allBills);
-  const unassigned = assets().length ? allBills.filter((b) => !b.assetId).length : 0;
+  const unassigned = assets().length ? allBills.filter((b) => !b.assetId && needsAsset(b)).length : 0;
   const ids = await enabledCats();
   const ys = years(bills);
   if (!ys.includes(state.year)) state.year = ys[0];
@@ -278,7 +288,7 @@ async function renderDocs() {
   if (!['all', 'new', 'review', 'unassigned'].includes(state.filter) && !ids.includes(state.filter)) state.filter = 'all';   // filtro di una categoria non pertinente al bene scelto
   const f = state.filter;
   const q = state.q.toLowerCase();
-  const rows = bills.filter((b) => (f === 'all' || (f === 'review' ? b.needsReview : f === 'new' ? state.newIds.has(b.id) : f === 'unassigned' ? !b.assetId : b.category === f))
+  const rows = bills.filter((b) => (f === 'all' || (f === 'review' ? b.needsReview : f === 'new' ? state.newIds.has(b.id) : f === 'unassigned' ? (!b.assetId && needsAsset(b)) : b.category === f))
     && (!q || `${b.supplier} ${b.fileName} ${b.invoiceNumber} ${b.subject}`.toLowerCase().includes(q)));
   view.innerHTML = `
     <input type="search" id="q" placeholder="Cerca fornitore, numero…" value="${esc(state.q)}">
@@ -298,16 +308,20 @@ async function renderDocs() {
 const scopeOf = (category) => (cats()[category] ? (cats()[category].scope || 'home') : null);
 
 async function openBill(id) {
+  if (id && (await db.bills.get(id))?.source === 'scontrino') return openReceipt(id);
   const b = id ? await db.bills.get(id) : { category: 'luce', issueDate: new Date().toISOString().slice(0, 10), source: 'manuale' };
   const dlg = $('#dlg');
   const canDrive = !!(id && b.pdf && !b.driveFileId && (await drive.isDriveEnabled()));
   const field = (k, label, type = 'text') => `<label>${label}</label><input type="${type}" data-k="${k}" ${type === 'number' ? 'step="0.01"' : ''} value="${esc(b[k] ?? '')}">`;
   dlg.innerHTML = `
     <h2 style="margin:0 0 4px">${id ? 'Dettaglio documento' : 'Nuovo documento'}</h2>
-    <label>Categoria</label><select data-k="category">${['home', 'car'].map((sc) => `<optgroup label="${sc === 'car' ? 'Vetture' : 'Immobili'}">${Object.entries(cats()).filter(([, c]) => (c.scope || 'home') === sc).map(([k, c]) => `<option value="${k}" ${b.category === k ? 'selected' : ''}>${c.icon} ${c.label}</option>`).join('')}</optgroup>`).join('')}<option value="altro" ${b.category === 'altro' ? 'selected' : ''}>📄 Altro</option></select>
+    <label>Categoria</label><select data-k="category">${SCOPES.map((sc) => `<optgroup label="${SCOPE_LABEL[sc]}">${Object.entries(cats()).filter(([, c]) => (c.scope || 'home') === sc).map(([k, c]) => `<option value="${k}" ${b.category === k ? 'selected' : ''}>${c.icon} ${c.label}</option>`).join('')}</optgroup>`).join('')}<option value="altro" ${b.category === 'altro' ? 'selected' : ''}>📄 Altro</option></select>
+    <div id="subWrap" ${scopeOf(b.category) === 'exp' ? '' : 'hidden'}>${subField(b.category, b.subcategory)}</div>
+    <div id="assetWrap" ${scopeOf(b.category) === 'exp' ? 'hidden' : ''}>
     <label>Immobile / vettura <b style="color:var(--bad)">*</b></label>
     <select data-k="assetId" id="assetSel">${assetOptions(b.assetId || b.assetSuggest || (id ? '' : (assetById(state.asset) ? state.asset : '')), { only: scopeOf(b.category), placeholder: assets().length ? '— scegli a cosa si riferisce —' : '— nessuno: aggiungilo in Impostazioni —' })}</select>
     ${!b.assetId && b.assetNote ? `<div class="hint" style="color:var(--warn,#ffb938);margin-top:6px">${esc(REASON_TEXT[b.assetNote] || '')}${b.assetSuggest ? ` Suggerito: ${esc(assetLabel(assetById(b.assetSuggest)))} (intestatario coincidente): controlla e conferma.` : ''}</div>` : ''}
+    </div>
     ${field('holder', 'Intestatario (dal documento)')}${field('supplyAddress', 'Indirizzo fornitura (dal documento)')}
     ${field('supplier', 'Fornitore')}${field('amount', 'Importo (€)', 'number')}${field('consumption', 'Consumo', 'number')}
     ${field('issueDate', 'Data documento', 'date')}${field('periodFrom', 'Periodo da', 'date')}${field('periodTo', 'Periodo a', 'date')}
@@ -325,8 +339,11 @@ async function openBill(id) {
   // cambiando categoria si propongono solo immobili (luce, gas…) o solo vetture (bollo, carburante…)
   const catSel = dlg.querySelector('[data-k=category]'), astSel = $('#assetSel', dlg);
   const ph = astSel.options[0]?.value === '' ? astSel.options[0].textContent : '— scegli a cosa si riferisce —';
+  const refreshSub = bindSub(dlg, () => catSel.value);
   catSel.onchange = () => {
-    const keep = astSel.value, only = scopeOf(catSel.value);
+    const sc = scopeOf(catSel.value);
+    $('#assetWrap', dlg).hidden = sc === 'exp'; $('#subWrap', dlg).hidden = sc !== 'exp'; refreshSub('');
+    const keep = astSel.value, only = sc;
     astSel.innerHTML = assetOptions(keep, { only, placeholder: ph });
     if (!astSel.value) astSel.value = '';
   };
@@ -352,8 +369,10 @@ async function openBill(id) {
       patch[k] = el.type === 'checkbox' ? el.checked : el.type === 'number' ? (el.value === '' ? null : Number(el.value)) : (el.value || null);
     });
     // il tag è obbligatorio: ogni bolletta deve riferirsi a un immobile o a una vettura
-    if (!assets().length) { toast('Aggiungi prima un immobile o una vettura in Impostazioni', 5000); return; }
-    if (!patch.assetId) { const sel = $('#assetSel', dlg); sel.classList.add('invalid'); sel.focus(); toast('Scegli a quale immobile o vettura si riferisce', 4000); return; }
+    const personal = scopeOf(patch.category) === 'exp';
+    if (personal) { patch.assetId = null; if (!patch.subcategory) patch.subcategory = null; } else patch.subcategory = null;
+    if (!personal && !assets().length) { toast('Aggiungi prima un immobile o una vettura in Impostazioni', 5000); return; }
+    if (!personal && !patch.assetId) { const sel = $('#assetSel', dlg); sel.classList.add('invalid'); sel.focus(); toast('Scegli a quale immobile o vettura si riferisce', 4000); return; }
     patch.unit = cat(patch.category).unit;
     patch.needsReview = false;
     patch.assetBy = 'manual'; patch.assetNote = null; patch.assetSuggest = null;   // scelta confermata dall'utente
@@ -361,7 +380,7 @@ async function openBill(id) {
     if (id) await updateBill(id, patch);
     let note = '';
     // ricorda la scelta (categoria + fornitore → bene) e la applica alle bollette simili ancora senza bene
-    const similar = await learnAssignment({ ...b, ...patch, id: savedId }, patch.assetId);
+    const similar = personal ? 0 : await learnAssignment({ ...b, ...patch, id: savedId }, patch.assetId);
     if (similar) note += ` · assegnata anche ad altre ${similar} simili`;
     if (id && b.driveFileId && (await drive.isDriveEnabled())) {
       // dati cambiati → il file su Drive viene rinominato/spostato di conseguenza
@@ -403,6 +422,187 @@ async function renderStats() {
   bindAssetSelect(renderStats);
   $('#cat').onchange = (e) => { state.statCat = e.target.value; renderStats(); };
   $('#yr').onchange = (e) => { state.year = Number(e.target.value); renderStats(); };
+}
+
+// ---------- Spese personali: scontrini e sottocategorie ----------
+const expCats = () => Object.entries(cats()).filter(([, c]) => c.scope === 'exp').map(([id]) => id);
+const eurIn = (n) => new Intl.NumberFormat('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+const today = () => new Date().toISOString().slice(0, 10);
+
+function subOptions(catId, value) {
+  const list = subcats(catId);
+  const extra = value && !list.includes(value) ? [value] : [];
+  return `<option value="">— nessuna —</option>${[...list, ...extra].map((s) => `<option ${s === value ? 'selected' : ''}>${esc(s)}</option>`).join('')}`;
+}
+function subField(catId, value) {
+  return `<label>Sottocategoria</label>
+    <div class="asel"><select data-k="subcategory">${subOptions(catId, value)}</select><button type="button" class="btn sec" id="subNew" style="flex:none;padding:0 16px" aria-label="Nuova sottocategoria">＋</button></div>
+    <div class="asel" id="subAddRow" hidden style="margin-top:6px"><input type="text" id="subAddIn" maxlength="30" placeholder="Nome della nuova sottocategoria" autocomplete="off"><button type="button" class="btn" id="subAddOk" style="flex:none">Aggiungi</button></div>`;
+}
+/** Collega il "＋" della sottocategoria; restituisce la funzione che ricarica l'elenco quando cambia la categoria. */
+function bindSub(root, getCat) {
+  const sel = $('[data-k=subcategory]', root);
+  const refresh = (v) => { sel.innerHTML = subOptions(getCat(), v ?? sel.value); };
+  $('#subNew', root).onclick = () => { $('#subAddRow', root).hidden = false; $('#subAddIn', root).focus(); };
+  const add = async () => {
+    try {
+      const n = await addSubcat(getCat(), $('#subAddIn', root).value);
+      $('#subAddIn', root).value = ''; $('#subAddRow', root).hidden = true; refresh(n);
+    } catch (e) { toast(e.message, 3500); }
+  };
+  $('#subAddOk', root).onclick = add;
+  $('#subAddIn', root).onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } };
+  return refresh;
+}
+
+function subBreakdownCard(rows, i) {
+  const list = bySubcategory(rows);
+  if (list.length < 1 || (list.length === 1 && list[0].name === 'Senza sottocategoria')) return '';
+  const max = Math.max(...list.map((x) => x.total), 1);
+  return `<div class="card enter" style="--i:${i}"><h3>Per sottocategoria</h3>${list.map((x) => `<div class="row pr"><div class="grow"><div class="t">${esc(x.name)}</div>
+    <div class="bar"><i style="width:${Math.max(3, (x.total / max) * 100)}%"></i></div><div class="s">${x.count} spes${x.count === 1 ? 'a' : 'e'}</div></div><b>${eur(x.total)}</b></div>`).join('')}</div>`;
+}
+
+function openSubsDialog(catId) {
+  const dlg = $('#dlg'), c = cat(catId);
+  const draw = () => {
+    const list = subcats(catId);
+    dlg.innerHTML = `<h2 style="margin:0 0 4px">${c.icon} ${esc(c.label)}</h2><div class="hint" style="margin-bottom:8px">Sottocategorie a tua scelta: le trovi quando registri una spesa.</div>
+      ${list.length ? list.map((s) => `<div class="row" style="padding:8px 0"><div class="grow">${esc(s)}</div><button class="icon-btn" data-rm="${esc(s)}" aria-label="Elimina ${esc(s)}">🗑</button></div>`).join('') : '<div class="s" style="padding:6px 0">Nessuna sottocategoria ancora.</div>'}
+      <div class="asel" style="margin-top:10px"><input type="text" id="sbIn" maxlength="30" placeholder="es. Alimentari, Pranzo di lavoro…" autocomplete="off"><button class="btn" id="sbAdd" style="flex:none">Aggiungi</button></div>
+      <div style="display:flex;gap:8px;margin-top:14px"><button class="btn sec" id="sbClose">Chiudi</button></div>`;
+    const add = async () => { try { await addSubcat(catId, $('#sbIn', dlg).value); draw(); $('#sbIn', dlg).focus(); } catch (e) { toast(e.message, 3500); } };
+    $('#sbAdd', dlg).onclick = add;
+    $('#sbIn', dlg).onkeydown = (e) => { if (e.key === 'Enter') add(); };
+    $('#sbClose', dlg).onclick = () => { dlg.close(); if (location.hash.startsWith('#/spese') || location.hash.startsWith('#/settings')) route(); };
+    dlg.querySelectorAll('[data-rm]').forEach((b) => (b.onclick = async () => { if (confirm(`Eliminare "${b.dataset.rm}"? Le spese già registrate restano, senza sottocategoria.`)) { await removeSubcat(catId, b.dataset.rm); draw(); } }));
+  };
+  draw(); dlg.showModal();
+}
+
+/** Riduce la foto (max 1600 px, JPEG) per non riempire la memoria del telefono. */
+async function shrinkImage(file, max = 1600, quality = 0.8) {
+  try {
+    const bmp = await createImageBitmap(file);
+    const k = Math.min(1, max / Math.max(bmp.width, bmp.height));
+    const cv = document.createElement('canvas'); cv.width = Math.round(bmp.width * k); cv.height = Math.round(bmp.height * k);
+    cv.getContext('2d').drawImage(bmp, 0, 0, cv.width, cv.height);
+    const blob = await new Promise((res) => cv.toBlob(res, 'image/jpeg', quality));
+    return blob || file;
+  } catch { return file; }
+}
+
+async function renderSpese() {
+  const sp = state.sp, ids = expCats().filter((id) => true);
+  const all = applyOwner(await listBills()).filter((b) => cats()[b.category]?.scope === 'exp');
+  const ys = [...new Set([...all.map((b) => (b.issueDate || '').slice(0, 4)).filter(Boolean), sp.y])].sort().reverse();
+  const inPeriod = all.filter((b) => (sp.y === 'all' || (b.issueDate || '').startsWith(sp.y)) && (sp.m === 'all' || (b.issueDate || '').slice(5, 7) === sp.m));
+  const rows = inPeriod.filter((b) => sp.c === 'all' || b.category === sp.c).sort((a, b) => (b.issueDate || '').localeCompare(a.issueDate || '') || b.id - a.id);
+  const tot = rows.reduce((s, b) => s + (b.amount || 0), 0);
+  const perCat = ids.map((id) => [id, inPeriod.filter((b) => b.category === id).reduce((s, b) => s + (b.amount || 0), 0)]).filter(([, v]) => v > 0);
+  const maxCat = Math.max(1, ...perCat.map(([, v]) => v));
+  const period = [sp.m === 'all' ? '' : MESI_FULL[Number(sp.m) - 1], sp.y === 'all' ? '' : sp.y].filter(Boolean).join(' ') || 'tutto il periodo';
+  view.innerHTML = `
+    <h2 style="margin:4px 0 10px">Spese e scontrini</h2>
+    <div class="asel enter" style="--i:0"><button class="btn" id="spPhoto">📷 Scontrino con foto</button><button class="btn sec" id="spNew">✍️ Senza foto</button></div>
+    <input type="file" id="spFile" accept="image/*" capture="environment" hidden>
+    ${ownerSelect() ? `<div class="enter" style="--i:1;margin-top:10px">${ownerSelect()}</div>` : ''}
+    <div class="grid2 enter" style="--i:1;margin-top:10px">
+      <select id="spy" aria-label="Anno"><option value="all" ${sp.y === 'all' ? 'selected' : ''}>Tutti gli anni</option>${ys.map((v) => `<option ${v === sp.y ? 'selected' : ''}>${v}</option>`).join('')}</select>
+      <select id="spm" aria-label="Mese"><option value="all" ${sp.m === 'all' ? 'selected' : ''}>Tutti i mesi</option>${MESI_FULL.map((l, i) => { const v = String(i + 1).padStart(2, '0'); return `<option value="${v}" ${sp.m === v ? 'selected' : ''}>${l}</option>`; }).join('')}</select>
+    </div>
+    <div class="chips enter" style="--i:2"><button class="chip ${sp.c === 'all' ? 'on' : ''}" data-c="all">Tutte</button>${ids.map((id) => `<button class="chip ${sp.c === id ? 'on' : ''}" data-c="${id}">${cat(id).icon} ${esc(cat(id).label)}</button>`).join('')}</div>
+    <div class="card enter" style="--i:3"><div class="row" style="border:0"><div class="grow"><div class="t">${rows.length} spes${rows.length === 1 ? 'a' : 'e'}</div><div class="s">${esc(period)}${sp.c !== 'all' ? ` · ${esc(cat(sp.c).label)}` : ''}</div></div><b style="font-size:20px">${eur(tot)}</b></div>
+      ${sp.c === 'all' ? perCat.map(([id, v]) => `<div class="row pr"><span class="catdot" style="background:${cat(id).color}"></span><div class="grow"><div class="t">${esc(cat(id).label)}</div><div class="bar"><i style="width:${Math.max(3, (v / maxCat) * 100)}%;background:${cat(id).color}"></i></div></div><b>${eur(v)}</b></div>`).join('') : `<button class="btn sec" id="spSubs" style="width:100%;margin-top:8px">🏷 Gestisci sottocategorie di ${esc(cat(sp.c).label)}</button>`}</div>
+    ${sp.c !== 'all' ? subBreakdownCard(rows, 4) : ''}
+    <div class="card enter" style="--i:5">${rows.length ? rows.map((b) => `<div class="row" data-sid="${b.id}"><div class="ico" style="background:${cat(b.category).color}22">${cat(b.category).icon}</div>
+      <div class="grow"><div class="t">${esc(b.supplier || cat(b.category).label)} ${b.subcategory ? `<span class="tag2">${esc(b.subcategory)}</span>` : ''}${b.photo ? ' 📷' : ''}</div><div class="s">${fmtDate(b.issueDate)}${sp.c === 'all' ? ` · ${esc(cat(b.category).label)}` : ''}${b.receipt?.items?.length ? ` · ${b.receipt.items.length} righe` : ''}</div></div><b>${eur(b.amount)}</b></div>`).join('')
+      : emptyState('Nessuna spesa', 'Fotografa uno scontrino o aggiungi una spesa a mano.')}</div>`;
+  $('#spy').onchange = (e) => { sp.y = e.target.value; renderSpese(); };
+  $('#spm').onchange = (e) => { sp.m = e.target.value; renderSpese(); };
+  view.querySelectorAll('[data-c]').forEach((c) => (c.onclick = () => { sp.c = c.dataset.c; renderSpese(); }));
+  const so = $('#so'); if (so) so.onchange = async (e) => { await setOwner(e.target.value); renderSpese(); };
+  if ($('#spSubs')) $('#spSubs').onclick = () => openSubsDialog(sp.c);
+  $('#spPhoto').onclick = () => $('#spFile').click();
+  $('#spNew').onclick = () => openReceipt(null);
+  $('#spFile').onchange = async (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) openReceipt(null, await shrinkImage(f)); };
+  view.querySelectorAll('[data-sid]').forEach((r) => (r.onclick = () => (async () => { const b = await db.bills.get(Number(r.dataset.sid)); return b.source === 'scontrino' ? openReceipt(b.id) : openBill(b.id); })()));
+}
+
+async function openReceipt(id, newPhoto = null) {
+  const b = id ? await db.bills.get(id) : { category: state.sp.c !== 'all' ? state.sp.c : 'spesa', issueDate: today(), source: 'scontrino', ownerKey: state.owner !== 'all' ? state.owner : '' };
+  if (!b) return;
+  let photo = newPhoto || b.photo || null, photoUrl = null;
+  const dec = (v) => (v == null ? '' : String(v).replace('.', ','));
+  const items = (b.receipt?.items || []).map((l) => ({ name: l.name || '', qty: dec(l.qty), price: dec(l.price) }));
+  const dlg = $('#dlg');
+  const ow = owners();
+  dlg.innerHTML = `
+    <h2 style="margin:0 0 4px">${id ? 'Spesa' : 'Nuova spesa'}</h2>
+    <div id="rc-photo"></div>
+    <div class="asel" style="margin-top:8px"><button type="button" class="btn sec" id="rc-pick">📷 ${photo ? 'Cambia foto' : 'Aggiungi foto'}</button>${photo ? '<button type="button" class="btn sec" id="rc-unpick" style="flex:none">Togli</button>' : ''}</div>
+    <input type="file" id="rc-file" accept="image/*" capture="environment" hidden>
+    <label>Categoria</label><select data-k="category">${expCats().map((k) => `<option value="${k}" ${b.category === k ? 'selected' : ''}>${cat(k).icon} ${esc(cat(k).label)}</option>`).join('')}</select>
+    ${subField(b.category, b.subcategory)}
+    <label>Negozio / locale</label><input type="text" data-k="supplier" value="${esc(b.supplier || '')}" placeholder="es. Conad, Pizzeria da Gino">
+    <label>Data</label><input type="date" data-k="issueDate" value="${esc(b.issueDate || today())}">
+    ${ow.size ? `<label>Di chi è la spesa</label><select data-k="ownerKey"><option value="">—</option>${[...ow].map(([k, n]) => `<option value="${esc(k)}" ${k === b.ownerKey ? 'selected' : ''}>👤 ${esc(n)}</option>`).join('')}</select>` : ''}
+    <label>Righe dello scontrino <span class="s">(facoltative: il totale si calcola da solo)</span></label>
+    <div id="rc-lines"></div>
+    <button type="button" class="btn sec" id="rc-add" style="width:100%;margin-top:6px">+ Aggiungi riga</button>
+    <label>Totale scontrino (€) <span class="s">(lascia vuoto per usare la somma delle righe)</span></label>
+    <input type="text" inputmode="decimal" id="rc-total" value="${b.receipt?.manualTotal != null ? eurIn(b.receipt.manualTotal) : (!b.receipt?.items?.length && b.amount != null ? eurIn(b.amount) : '')}">
+    <div class="verdict" id="rc-sum" style="margin-top:10px"></div>
+    <label>Note</label><input type="text" data-k="notes" value="${esc(b.notes || '')}">
+    <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap"><button class="btn" id="rc-save">Salva</button>${id ? '<button class="btn danger" id="rc-del">Elimina</button>' : ''}<button class="btn sec" id="rc-close">Chiudi</button></div>`;
+  dlg.showModal();
+  const catSel = dlg.querySelector('[data-k=category]');
+  const refreshSub = bindSub(dlg, () => catSel.value);
+  catSel.onchange = () => refreshSub('');
+
+  const drawPhoto = () => {
+    if (photoUrl) URL.revokeObjectURL(photoUrl);
+    photoUrl = photo ? URL.createObjectURL(photo) : null;
+    $('#rc-photo', dlg).innerHTML = photoUrl ? `<img src="${photoUrl}" alt="Foto dello scontrino" class="rc-img">` : '';
+    const img = $('.rc-img', dlg); if (img) img.onclick = () => img.classList.toggle('big');
+  };
+  drawPhoto();
+  $('#rc-pick', dlg).onclick = () => $('#rc-file', dlg).click();
+  $('#rc-file', dlg).onchange = async (e) => { const f = e.target.files[0]; if (f) { photo = await shrinkImage(f); drawPhoto(); $('#rc-pick', dlg).textContent = '📷 Cambia foto'; } };
+  const un = $('#rc-unpick', dlg); if (un) un.onclick = () => { photo = null; drawPhoto(); un.remove(); $('#rc-pick', dlg).textContent = '📷 Aggiungi foto'; };
+
+  const update = () => {
+    dlg.querySelectorAll('.rline').forEach((r, i) => { r.querySelector('.lt').textContent = items[i] && toNum(items[i].price) != null ? eurIn(lineTotal(items[i])) : '—'; });
+    const t = receiptTotals(items, $('#rc-total', dlg).value);
+    $('#rc-total', dlg).placeholder = t.count ? eurIn(t.sum) : '0,00';
+    $('#rc-sum', dlg).innerHTML = `<div class="row" style="border:0;padding:0"><div class="grow">Totale<div class="s">${t.count ? `${t.count} righ${t.count === 1 ? 'a' : 'e'} · somma ${eur(t.sum)}` : 'nessuna riga: indica il totale'}</div></div><b style="font-size:22px">${eur(t.total)}</b></div>${t.manual && t.count && t.diff ? `<div class="s ${t.diff < 0 ? 'pos' : 'neg'}" style="margin-top:4px">Differenza rispetto alle righe: ${t.diff > 0 ? '+' : '−'}${eur(Math.abs(t.diff))}</div>` : ''}`;
+  };
+  const drawLines = () => {
+    $('#rc-lines', dlg).innerHTML = items.map((l, i) => `<div class="rline" data-i="${i}"><input type="text" data-f="name" placeholder="Articolo" value="${esc(l.name)}"><input type="text" inputmode="decimal" data-f="qty" placeholder="Qtà" value="${esc(l.qty)}"><input type="text" inputmode="decimal" data-f="price" placeholder="Prezzo" value="${esc(l.price)}"><span class="lt">—</span><button type="button" class="icon-btn" data-rm="${i}" aria-label="Togli riga">✕</button></div>`).join('');
+    dlg.querySelectorAll('.rline input').forEach((inp) => (inp.oninput = () => { items[Number(inp.closest('.rline').dataset.i)][inp.dataset.f] = inp.value; update(); }));
+    dlg.querySelectorAll('[data-rm]').forEach((bt) => (bt.onclick = () => { items.splice(Number(bt.dataset.rm), 1); drawLines(); }));
+    update();
+  };
+  drawLines();
+  $('#rc-add', dlg).onclick = () => { items.push({ name: '', qty: '', price: '' }); drawLines(); const ins = dlg.querySelectorAll('.rline input[data-f=name]'); ins[ins.length - 1]?.focus(); };
+  $('#rc-total', dlg).oninput = update;
+  $('#rc-close', dlg).onclick = () => { if (photoUrl) URL.revokeObjectURL(photoUrl); dlg.close(); };
+  if (id) $('#rc-del', dlg).onclick = async () => { if (confirm('Eliminare questa spesa?')) { await deleteBill(id); dlg.close(); route(); } };
+  $('#rc-save', dlg).onclick = async () => {
+    const patch = {};
+    dlg.querySelectorAll('[data-k]').forEach((el) => { patch[el.dataset.k] = el.value || null; });
+    const kept = items.filter((l) => toNum(l.price) != null || (l.name || '').trim());
+    const t = receiptTotals(kept, $('#rc-total', dlg).value);
+    if (!(t.total > 0)) { toast('Indica il totale o almeno una riga con il prezzo', 4000); return; }
+    Object.assign(patch, {
+      amount: t.total, unit: '', source: 'scontrino', needsReview: false, assetId: null, assetBy: null, assetNote: null, assetSuggest: null,
+      ownerKey: patch.ownerKey || '', fileName: b.fileName || 'Scontrino', photo,
+      receipt: { items: kept.map((l) => ({ name: (l.name || '').trim(), qty: toNum(l.qty), price: toNum(l.price) })), manualTotal: t.manual ? t.total : null },
+    });
+    if (id) await updateBill(id, patch); else await addBill({ ...b, ...patch });
+    if (photoUrl) URL.revokeObjectURL(photoUrl);
+    dlg.close(); toast('Spesa salvata'); route();
+  };
 }
 
 // ---------- Analisi prezzi ----------
@@ -665,6 +865,7 @@ async function renderSettings() {
     if (d.open) state.openSet.add(d.dataset.sec); else state.openSet.delete(d.dataset.sec);
   }));
   // categorie: abilita/disabilita, elimina (solo personalizzate), aggiungi
+  view.querySelectorAll('[data-subs]').forEach((el) => (el.onclick = () => openSubsDialog(el.dataset.subs)));
   view.querySelectorAll('[data-catset]').forEach((el) => (el.onchange = () => setSetting(`cat.${el.dataset.catset}`, el.checked)));
   view.querySelectorAll('[data-delcat]').forEach((el) => (el.onclick = async () => {
     const id = el.dataset.delcat;
@@ -678,8 +879,8 @@ async function catSettingsHtml() {
   let h = '';
   for (const [id, c] of Object.entries(cats())) {
     const on = (await getSetting(`cat.${id}`)) !== false;
-    h += `<div class="set-item"><div class="catline"><span class="catdot" style="background:${c.color}"></span><div><div>${c.icon} ${esc(c.label)}${c.custom ? ' <span class="tag2">tua</span>' : ''}</div><div class="hint">${(c.scope === 'car' ? '🚗 Vetture · ' : '🏠 Immobili · ') + (c.kind === 'income' ? 'Entrata' : 'Spesa')}${c.unit ? ` · ${esc(c.unit)}` : ''}</div></div></div>
-      <div class="acts">${c.custom ? `<button class="icon-btn" data-delcat="${id}" aria-label="Elimina ${esc(c.label)}">🗑</button>` : ''}<label class="switch"><input type="checkbox" data-catset="${id}" ${on ? 'checked' : ''}><span></span></label></div></div>`;
+    h += `<div class="set-item"><div class="catline"><span class="catdot" style="background:${c.color}"></span><div><div>${c.icon} ${esc(c.label)}${c.custom ? ' <span class="tag2">tua</span>' : ''}</div><div class="hint">${`${SCOPE_ICON[c.scope || 'home']} ${SCOPE_LABEL[c.scope || 'home']} · ` + (c.kind === 'income' ? 'Entrata' : 'Spesa')}${c.unit ? ` · ${esc(c.unit)}` : ''}</div></div></div>
+      <div class="acts">${c.scope === 'exp' ? `<button class="icon-btn" data-subs="${id}" aria-label="Sottocategorie di ${esc(c.label)}">🏷</button>` : ''}${c.custom ? `<button class="icon-btn" data-delcat="${id}" aria-label="Elimina ${esc(c.label)}">🗑</button>` : ''}<label class="switch"><input type="checkbox" data-catset="${id}" ${on ? 'checked' : ''}><span></span></label></div></div>`;
   }
   return h + '<div style="padding:12px 0"><button class="btn sec" id="addCat" style="width:100%">+ Aggiungi categoria</button></div>';
 }
@@ -738,7 +939,7 @@ function openCategoryDialog() {
     <div class="chips" id="nc-icons">${icons.map((i) => `<button type="button" class="chip" data-i="${i}">${i}</button>`).join('')}</div>
     <input type="text" id="nc-icon" maxlength="4" value="📌" style="width:90px">
     <label>Colore</label><input type="color" id="nc-color" value="#35c8ff">
-    <label>Si riferisce a</label><select id="nc-scope"><option value="home">🏠 Immobili</option><option value="car">🚗 Vetture</option></select>
+    <label>Si riferisce a</label><select id="nc-scope"><option value="home">🏠 Immobili</option><option value="car">🚗 Vetture</option><option value="exp">🛒 Spese personali</option></select>
     <label>Tipo</label><select id="nc-kind"><option value="cost">Spesa</option><option value="income">Entrata</option></select>
     <label>Unità di misura (facoltativa)</label><input type="text" id="nc-unit" maxlength="8" placeholder="es. kWh, L, kg">
     <label>Parole chiave per riconoscerla (facoltative)</label>
@@ -860,7 +1061,8 @@ async function renderCat(id) {
       <select id="cm" aria-label="Mese"><option value="all" ${m === 'all' ? 'selected' : ''}>Tutti i mesi</option>${MESI_FULL.map((l, i) => { const v = String(i + 1).padStart(2, '0'); return `<option value="${v}" ${v === m ? 'selected' : ''}>${l}</option>`; }).join('')}</select>
     </div>
     <div class="card enter" style="--i:2"><div class="row" style="border:0"><div class="grow"><div class="t">${rows.length} document${rows.length === 1 ? 'o' : 'i'}</div><div class="s">${esc(period)}</div></div><b class="${c.kind === 'income' ? 'pos' : ''}">${eur(tot)}</b></div></div>
-    <div class="card enter" style="--i:3">${rows.length ? rows.map((b) => billRow(b)).join('') : emptyState('Nessun documento', 'Nessuna bolletta in questo periodo.')}</div>`;
+    ${c.scope === 'exp' && rows.length ? subBreakdownCard(rows, 3) : ''}
+    <div class="card enter" style="--i:4">${rows.length ? rows.map((b) => billRow(b)).join('') : emptyState('Nessun documento', 'Nessuna bolletta in questo periodo.')}</div>`;
   bindAssetSelect(() => renderCat(id));
   $('#cy').onchange = (e) => { state.cat.y = e.target.value; renderCat(id); };
   $('#cm').onchange = (e) => { state.cat.m = e.target.value; renderCat(id); };
@@ -944,7 +1146,7 @@ async function route() {
   const [tab, arg] = (location.hash.replace('#/', '') || 'home').split('/');
   document.querySelectorAll('.tabs a').forEach((a) => a.classList.toggle('on', a.dataset.tab === (tab === 'cat' ? 'home' : tab)));
   moveIndicator();
-  if (tab === 'cat') renderCat(decodeURIComponent(arg || '')); else ({ home: renderHome, docs: renderDocs, stats: renderStats, prices: renderPrices, settings: renderSettings }[tab] || renderHome)();
+  if (tab === 'cat') renderCat(decodeURIComponent(arg || '')); else ({ home: renderHome, docs: renderDocs, stats: renderStats, prices: renderPrices, spese: renderSpese, settings: renderSettings }[tab] || renderHome)();
   window.scrollTo(0, 0);
   pushWidget();   // il widget sulla Home segue i dati dell'app
 }

@@ -44,7 +44,7 @@ export async function exportAll() {
   return {
     app: 'BillRadar', version: 1, exportedAt: new Date().toISOString(),
     // i PDF non vengono inclusi nel JSON (solo i dati estratti)
-    bills: bills.map(({ pdf, ...rest }) => rest),
+    bills: bills.map(({ pdf, photo, ...rest }) => rest),   // né PDF né foto degli scontrini: restano sul telefono
     offers: offers.map(({ pdf, ...rest }) => rest),   // solo i dati: i PDF dei preventivi restano sul telefono
     settings: kv.filter((r) => !r.key.startsWith('gmail.') && !r.key.startsWith('drive.')),
   };
@@ -75,8 +75,8 @@ export async function wipeAll() {
 }
 
 export function billsToCSV(bills) {
-  const head = ['data', 'categoria', 'fornitore', 'importo', 'consumo', 'unita', 'periodo_da', 'periodo_a', 'scadenza', 'numero', 'origine'];
+  const head = ['data', 'categoria', 'sottocategoria', 'fornitore', 'importo', 'consumo', 'unita', 'periodo_da', 'periodo_a', 'scadenza', 'numero', 'origine'];
   const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const rows = bills.map((b) => [b.issueDate, b.category, b.supplier, b.amount, b.consumption, b.unit, b.periodFrom, b.periodTo, b.dueDate, b.invoiceNumber, b.source].map(esc).join(';'));
+  const rows = bills.map((b) => [b.issueDate, b.category, b.subcategory, b.supplier, b.amount, b.consumption, b.unit, b.periodFrom, b.periodTo, b.dueDate, b.invoiceNumber, b.source].map(esc).join(';'));
   return [head.join(';'), ...rows].join('\n');
 }

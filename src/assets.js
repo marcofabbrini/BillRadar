@@ -3,6 +3,7 @@ import { getKV, setKV, db } from './db.js';
 import { ruleKey, assignAsset } from './assetmatch.js';
 import { extractHolder, extractAddress } from './parser.js';
 import { pdfToText } from './pdf.js';
+import { needsAsset } from './categories.js';
 
 let ALL = [];
 export const assets = () => ALL;
@@ -44,11 +45,11 @@ export async function removeAsset(id) {
   await loadAssets();
 }
 
-export const countUnassigned = () => db.bills.filter((b) => !b.assetId).count();
+export const countUnassigned = () => db.bills.filter((b) => !b.assetId && needsAsset(b)).count();
 
 /** Assegna a tutte le bollette senza bene. */
 export async function assignAllUnassigned(id) {
-  return db.bills.filter((b) => !b.assetId).modify({ assetId: id });
+  return db.bills.filter((b) => !b.assetId && needsAsset(b)).modify({ assetId: id });
 }
 
 const words = (v) => String(v || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
@@ -71,7 +72,7 @@ export async function learnAssignment(bill, assetId) {
   const hasEvidence = !!(bill.holder || bill.supplyAddress);
   if (asset?.address && !hasEvidence) return 0;   // un immobile "verificato" non si estende a documenti senza indirizzo/intestatario
   const key = tupleKey(bill);
-  return db.bills.filter((b) => !b.assetId && b.id !== bill.id && tupleKey(b) === key).modify({ assetId, assetBy: 'manual', assetNote: null, assetSuggest: null });
+  return db.bills.filter((b) => !b.assetId && needsAsset(b) && b.id !== bill.id && tupleKey(b) === key).modify({ assetId, assetBy: 'manual', assetNote: null, assetSuggest: null });
 }
 
 /** Esito dell'assegnazione da salvare sul documento. */
@@ -87,7 +88,7 @@ export function assignmentFields(result) {
 /** Rilegge i PDF già presenti e (ri)assegna le bollette senza bene o assegnate in automatico; quelle scelte a mano non si toccano. */
 export async function reverifyBills(onProgress = () => {}) {
   const rules = await getKV('assetRules', {});
-  const todo = await db.bills.filter((b) => !b.assetId || b.assetBy === 'auto').toArray();
+  const todo = await db.bills.filter((b) => needsAsset(b) && (!b.assetId || b.assetBy === 'auto')).toArray();
   const out = { total: todo.length, assigned: 0, manual: 0, noPdf: 0, changed: 0 };
   for (let i = 0; i < todo.length; i++) {
     onProgress(i + 1, todo.length);

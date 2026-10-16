@@ -298,3 +298,17 @@ select.invalid { border-color: var(--bad); box-shadow: 0 0 0 3px rgba(255,90,90,
 .frow .asel > select:first-child:not(:last-child) { flex: 1.2 1 0; }
 .frow .asel > select:last-child { flex: 1 1 0; }
 .frow select { padding-right: 18px; font-size: 13.5px; }
+
+/* spese personali e scontrini */
+[hidden] { display: none !important; }
+.tabs a { font-size: 9.5px; letter-spacing: -.1px; }
+.tabs a i { font-size: 18px; }
+.asel .btn { flex: 1; }
+.bar { height: 6px; border-radius: 4px; background: var(--line); margin: 4px 0 2px; overflow: hidden; }
+.bar i { display: block; height: 100%; border-radius: 4px; background: var(--acc); }
+.rc-img { width: 100%; max-height: 160px; object-fit: cover; border-radius: 12px; border: 1px solid var(--line); cursor: zoom-in; }
+.rc-img.big { max-height: none; object-fit: contain; cursor: zoom-out; }
+.rline { display: grid; grid-template-columns: 1fr 46px 64px 54px 26px; gap: 5px; align-items: center; margin-top: 6px; }
+.rline input { padding: 9px 8px; font-size: 14px; min-width: 0; }
+.rline .lt { text-align: right; font-size: 13px; font-weight: 600; }
+.rline .icon-btn { padding: 0; }
