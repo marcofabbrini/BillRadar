@@ -182,7 +182,11 @@ function simpleBars(vals, color) {
 
 async function enabledCats() {
   const out = [];
-  for (const id of Object.keys(cats())) if ((await getSetting(`cat.${id}`)) !== false) out.push(id);
+  const sel = assetById(state.asset);   // con un immobile o una vettura scelti, solo le voci che li riguardano
+  for (const [id, c] of Object.entries(cats())) {
+    if (sel && (c.scope || 'home') !== sel.kind) continue;
+    if ((await getSetting(`cat.${id}`)) !== false) out.push(id);
+  }
   return out;
 }
 
@@ -251,6 +255,7 @@ function billRow(b, showDue = false) {
 async function renderDocs() {
   const bills = applyAsset(await listBills());
   const ids = await enabledCats();
+  if (!['all', 'new', 'review', 'unassigned'].includes(state.filter) && !ids.includes(state.filter)) state.filter = 'all';   // filtro di una categoria non pertinente al bene scelto
   const f = state.filter;
   const q = state.q.toLowerCase();
   const rows = bills.filter((b) => (f === 'all' || (f === 'review' ? b.needsReview : f === 'new' ? state.newIds.has(b.id) : f === 'unassigned' ? !b.assetId : b.category === f))
