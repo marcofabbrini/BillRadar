@@ -4,9 +4,9 @@ import { getKV, setKV, db } from './db.js';
 import { setKinds } from './assetmatch.js';
 
 let ALL = { ...BUILTIN };
-export const SCOPES = ['home', 'car', 'exp'];   // immobili, vetture, spese personali (senza immobile/vettura)
-export const SCOPE_LABEL = { home: 'Immobili', car: 'Vetture', exp: 'Spese' };
-export const SCOPE_ICON = { home: '🏠', car: '🚗', exp: '🛒' };
+export const SCOPES = ['home', 'car', 'other', 'exp'];   // immobili, vetture, altri beni, spese personali (senza bene)
+export const SCOPE_LABEL = { home: 'Immobili', car: 'Vetture', other: 'Altro (altri beni)', exp: 'Spese' };
+export const SCOPE_ICON = { home: '🏠', car: '🚗', other: '📦', exp: '🛒' };
 /** Le bollette di immobili e vetture richiedono il tag; le spese personali no. */
 export const needsAsset = (b) => cats()[b?.category]?.scope !== 'exp';
 

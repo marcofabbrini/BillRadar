@@ -93,14 +93,14 @@ const applyAsset = (bills) => {
   bills = applyOwner(bills);
   return state.asset === 'all' ? bills : state.asset === 'none' ? bills.filter((b) => !b.assetId && needsAsset(b)) : bills.filter((b) => b.assetId === state.asset);
 };
-const assetOptions = (value, { all = '🏠🚗 Tutti', none = true, placeholder = null, only = null, owned = false } = {}) => {
+const assetOptions = (value, { all = 'Tutti i beni', none = true, placeholder = null, only = null, owned = false } = {}) => {
   const grp = (kind, label) => {
     if (only && only !== kind) return '';
     const l = assets().filter((a) => a.kind === kind && (!owned || ownedBy(a)));
     return l.length ? `<optgroup label="${label}">${l.map((a) => `<option value="${a.id}" ${a.id === value ? 'selected' : ''}>${esc(assetLabel(a))}</option>`).join('')}</optgroup>` : '';
   };
   return (placeholder ? `<option value="">${placeholder}</option>` : `<option value="all" ${value === 'all' ? 'selected' : ''}>${all}</option>`)
-    + grp('home', 'Immobili') + grp('car', 'Vetture')
+    + grp('home', 'Immobili') + grp('car', 'Vetture') + grp('other', 'Altro')
     + (none && !placeholder ? `<option value="none" ${value === 'none' ? 'selected' : ''}>Senza assegnazione</option>` : '');
 };
 async function setOwner(v) {
@@ -244,7 +244,7 @@ async function renderHome() {
     ${reauth ? '<div class="card" style="border-color:var(--bad)"><b>Gmail non è più collegato.</b> <button class="btn" id="reauth" style="margin-top:8px;width:100%">Riconnetti Gmail</button></div>' : ''}
     ${fresh.length ? `<div class="card notice enter" style="--i:0"><div class="nt"><span class="bell">🔔</span><div><b>${fresh.length} ${fresh.length > 1 ? 'nuove bollette' : 'nuova bolletta'}</b><div class="s">${esc(freshTxt)}</div></div></div>
       <div class="nb"><button class="btn" id="nSee">Vedi</button><button class="btn sec" id="nOk">Ok</button></div></div>` : ''}
-    ${unassigned ? `<div class="card enter" style="--i:1"><b>${unassigned}</b> bollett${unassigned > 1 ? 'e' : 'a'} senza immobile o vettura <a href="#/docs" data-filter="unassigned" style="float:right">Assegna →</a></div>` : ''}
+    ${unassigned ? `<div class="card enter" style="--i:1"><b>${unassigned}</b> bollett${unassigned > 1 ? 'e' : 'a'} senza immobile, vettura o altro <a href="#/docs" data-filter="unassigned" style="float:right">Assegna →</a></div>` : ''}
     <div class="${assets().length ? 'frow' : ''}" style="margin:0"><select id="yr" aria-label="Anno">${ys.map((v) => `<option ${v === state.year ? 'selected' : ''}>${v}</option>`).join('')}</select>${assetSelect()}</div>
     <div class="grid enter" style="margin-top:12px;--i:1">
       <div class="kpi glow"><small>Spese ${state.year}</small><b data-count="${t.spese}">${eur(t.spese)}</b>
@@ -340,10 +340,10 @@ async function openBill(id) {
   const field = (k, label, type = 'text') => `<label>${label}</label><input type="${type}" data-k="${k}" ${type === 'number' ? 'step="0.01"' : ''} value="${esc(b[k] ?? '')}">`;
   dlg.innerHTML = `
     <h2 style="margin:0 0 4px">${id ? 'Dettaglio documento' : 'Nuovo documento'}</h2>
-    <label>Categoria</label><select data-k="category">${SCOPES.map((sc) => `<optgroup label="${SCOPE_LABEL[sc]}">${Object.entries(cats()).filter(([, c]) => (c.scope || 'home') === sc).map(([k, c]) => `<option value="${k}" ${b.category === k ? 'selected' : ''}>${c.icon} ${c.label}</option>`).join('')}</optgroup>`).join('')}<option value="altro" ${b.category === 'altro' ? 'selected' : ''}>📄 Altro</option></select>
+    <label>Categoria</label><select data-k="category">${SCOPES.filter((sc) => Object.values(cats()).some((c) => (c.scope || 'home') === sc)).map((sc) => `<optgroup label="${SCOPE_LABEL[sc]}">${Object.entries(cats()).filter(([, c]) => (c.scope || 'home') === sc).map(([k, c]) => `<option value="${k}" ${b.category === k ? 'selected' : ''}>${c.icon} ${c.label}</option>`).join('')}</optgroup>`).join('')}<option value="altro" ${b.category === 'altro' ? 'selected' : ''}>📄 Altro</option></select>
     <div id="subWrap" ${scopeOf(b.category) === 'exp' ? '' : 'hidden'}>${subField(b.category, b.subcategory)}</div>
     <div id="assetWrap" ${scopeOf(b.category) === 'exp' ? 'hidden' : ''}>
-    <label>Immobile / vettura <b style="color:var(--bad)">*</b></label>
+    <label>Immobile / vettura / altro <b style="color:var(--bad)">*</b></label>
     <select data-k="assetId" id="assetSel">${assetOptions(b.assetId || b.assetSuggest || (id ? '' : (assetById(state.asset) ? state.asset : '')), { only: scopeOf(b.category), placeholder: assets().length ? '— scegli a cosa si riferisce —' : '— nessuno: aggiungilo in Impostazioni —' })}</select>
     ${!b.assetId && b.assetNote ? `<div class="hint" style="color:var(--warn,#ffb938);margin-top:6px">${esc(REASON_TEXT[b.assetNote] || '')}${b.assetSuggest ? ` Suggerito: ${esc(assetLabel(assetById(b.assetSuggest)))} (intestatario coincidente): controlla e conferma.` : ''}</div>` : ''}
     </div>
@@ -403,7 +403,7 @@ async function openBill(id) {
     const personal = scopeOf(patch.category) === 'exp';
     if (personal) { patch.assetId = null; if (!patch.subcategory) patch.subcategory = null; } else patch.subcategory = null;
     if (!personal && !assets().length) { toast('Aggiungi prima un immobile o una vettura in Impostazioni', 5000); return; }
-    if (!personal && !patch.assetId) { const sel = $('#assetSel', dlg); sel.classList.add('invalid'); sel.focus(); toast('Scegli a quale immobile o vettura si riferisce', 4000); return; }
+    if (!personal && !patch.assetId) { const sel = $('#assetSel', dlg); sel.classList.add('invalid'); sel.focus(); toast('Scegli a quale immobile, vettura o altro si riferisce', 4000); return; }
     patch.unit = cat(patch.category).unit;
     patch.needsReview = false;
     patch.assetBy = 'manual'; patch.assetNote = null; patch.assetSuggest = null;   // scelta confermata dall'utente
@@ -900,7 +900,7 @@ function assetSettingsHtml() {
   const rows = list.map((a) => `<div class="set-item" data-editasset="${a.id}" style="cursor:pointer"><div class="catline"><span class="ico" style="width:38px;height:38px;border-radius:12px;display:grid;place-items:center;font-size:18px;background:var(--acc-soft)">${KIND_ICON[a.kind]}</span><div><div>${esc(a.name)}</div><div class="hint">${KIND_LABEL[a.kind]}${a.holder ? ` · intestato a ${esc(a.holder)}` : ''}${a.address ? ` · ${esc(a.address)}` : ''}${a.match?.length ? ` · codici: ${esc(a.match.join(', '))}` : ''}</div></div></div>
       <div class="acts"><button class="icon-btn" data-delasset="${a.id}" aria-label="Elimina ${esc(a.name)}">🗑</button></div></div>`).join('');
   return `${rows || '<div class="set-item mut">Nessun immobile o vettura. Aggiungili: ogni bolletta dovrà riferirsi a uno di essi. Qui puoi anche creare nuove categorie.</div>'}
-    <div style="padding:12px 0;display:flex;gap:8px;flex-wrap:wrap"><button class="btn sec" id="addAsset" style="flex:1">+ Aggiungi immobile o vettura</button><button class="btn sec" id="addCat2" style="flex:1">+ Nuova categoria</button>${list.length ? '<button class="btn sec" id="reverify" style="flex:1">Verifica le bollette già presenti</button>' : ''}</div>
+    <div style="padding:12px 0;display:flex;gap:8px;flex-wrap:wrap"><button class="btn sec" id="addAsset" style="flex:1">+ Aggiungi immobile, vettura o altro</button><button class="btn sec" id="addCat2" style="flex:1">+ Nuova categoria</button>${list.length ? '<button class="btn sec" id="reverify" style="flex:1">Verifica le bollette già presenti</button>' : ''}</div>
     <div class="hint" style="padding-bottom:10px">Le bollette si assegnano da sole solo se indirizzo e intestatario del documento coincidono con quelli registrati. Se più schede hanno lo stesso indirizzo (intestatari diversi) l\'assegnazione resta manuale.</div>`;
 }
 
@@ -908,8 +908,8 @@ function openAssetDialog(id = null) {
   const a = id ? assetById(id) : null;
   const dlg = $('#dlg');
   dlg.innerHTML = `
-    <h2 style="margin:0 0 4px">${a ? 'Modifica' : 'Nuovo'} immobile o vettura</h2>
-    <label>Tipo</label><select id="as-kind"><option value="home" ${a?.kind !== 'car' ? 'selected' : ''}>🏠 Immobile</option><option value="car" ${a?.kind === 'car' ? 'selected' : ''}>🚗 Vettura</option></select>
+    <h2 style="margin:0 0 4px">${a ? 'Modifica' : 'Nuovo'} immobile, vettura o altro</h2>
+    <label>Tipo</label><select id="as-kind"><option value="home" ${a?.kind !== 'car' ? 'selected' : ''}>🏠 Immobile</option><option value="car" ${a?.kind === 'car' ? 'selected' : ''}>🚗 Vettura</option><option value="other" ${a?.kind === 'other' ? 'selected' : ''}>📦 Altro</option></select>
     <label>Nome</label><input type="text" id="as-name" maxlength="30" placeholder="es. Casa, Casa al mare, Panda" autocomplete="off" value="${esc(a?.name || '')}">
     <label>Intestatario delle utenze</label>
     <input type="text" id="as-holder" placeholder="es. Mario Rossi (come scritto in bolletta)" autocomplete="off" value="${esc(a?.holder || '')}">
@@ -949,7 +949,7 @@ function openCategoryDialog() {
     <div class="chips" id="nc-icons">${icons.map((i) => `<button type="button" class="chip" data-i="${i}">${i}</button>`).join('')}</div>
     <input type="text" id="nc-icon" maxlength="4" value="📌" style="width:90px">
     <label>Colore</label><input type="color" id="nc-color" value="#35c8ff">
-    <label>Si riferisce a</label><select id="nc-scope"><option value="home">🏠 Immobili</option><option value="car">🚗 Vetture</option><option value="exp">🛒 Spese personali</option></select>
+    <label>Si riferisce a</label><select id="nc-scope"><option value="home">🏠 Immobili</option><option value="car">🚗 Vetture</option><option value="other">📦 Altro (altri beni)</option><option value="exp">🛒 Spese personali</option></select>
     <label>Tipo</label><select id="nc-kind"><option value="cost">Spesa</option><option value="income">Entrata</option></select>
     <label>Unità di misura (facoltativa)</label><input type="text" id="nc-unit" maxlength="8" placeholder="es. kWh, L, kg">
     <label>Parole chiave per riconoscerla (facoltative)</label>

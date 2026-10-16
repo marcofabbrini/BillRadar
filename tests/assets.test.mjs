@@ -93,3 +93,10 @@ t('categoria personalizzata da vettura', () => {
   setKinds({ ...KIND_BY_CATEGORY, c_lavaggio: 'car' });
   assert.equal(assignAsset({ text: 'lavaggio', category: 'c_lavaggio' }, [casa, panda]).asset.id, 'c1');
 });
+
+t('bene di tipo "altro" con categoria dedicata', () => {
+  const studio = { id: 'o1', kind: 'other', name: 'Studio', holder: '', address: '', match: [] };
+  setKinds({ ...KIND_BY_CATEGORY, c_barca: 'other' });
+  assert.equal(assignAsset({ text: 'rimessaggio', category: 'c_barca' }, [casa, panda, studio]).asset.id, 'o1');
+  assert.equal(assignAsset({ text: 'luce', category: 'luce' }, [panda, studio]).asset, null);
+});

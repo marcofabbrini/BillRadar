@@ -8,8 +8,8 @@ import { needsAsset } from './categories.js';
 let ALL = [];
 export const assets = () => ALL;
 export const assetById = (id) => ALL.find((a) => a.id === id) || null;
-export const KIND_LABEL = { home: 'Immobile', car: 'Vettura' };
-export const KIND_ICON = { home: '🏠', car: '🚗' };
+export const KIND_LABEL = { home: 'Immobile', car: 'Vettura', other: 'Altro' };
+export const KIND_ICON = { home: '🏠', car: '🚗', other: '📦' };
 export const assetLabel = (a) => (a ? `${KIND_ICON[a.kind] || '📍'} ${a.name}` : '');
 
 export async function loadAssets() {
@@ -25,7 +25,7 @@ export async function saveAsset({ id, kind, name, match, holder, address }) {
   if (ALL.some((a) => a.id !== id && a.kind === kind && a.name.toLowerCase() === name.toLowerCase())) throw new Error('Esiste già con questo nome');
   const list = [...ALL];
   const rec = {
-    id: id || `a_${Math.random().toString(36).slice(2, 8)}`, kind: kind === 'car' ? 'car' : 'home', name,
+    id: id || `a_${Math.random().toString(36).slice(2, 8)}`, kind: ['car', 'other'].includes(kind) ? kind : 'home', name,
     holder: (holder || '').trim(), address: kind === 'car' ? '' : (address || '').trim(), match: parseMatch(match),
   };
   const i = list.findIndex((a) => a.id === rec.id);
