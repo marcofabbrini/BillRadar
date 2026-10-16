@@ -111,10 +111,34 @@ async function accessToken() {
   }
 }
 
+/** Traduce gli errori della Gmail API in indicazioni chiare. */
+async function gmailError(r) {
+  let reason = '', msg = '';
+  try {
+    const j = await r.json();
+    reason = j.error?.errors?.[0]?.reason || j.error?.status || '';
+    msg = j.error?.message || '';
+    // il dettaglio completo resta in console per la diagnosi
+    console.error('Gmail API', r.status, JSON.stringify(j.error || j));
+  } catch { /* corpo non JSON */ }
+  const hay = `${reason} ${msg}`.toLowerCase();
+  let hint;
+  if (hay.includes('accessnotconfigured') || hay.includes('has not been used') || hay.includes('disabled'))
+    hint = 'la Gmail API non è abilitata nel progetto Google Cloud (API e servizi → Libreria → Gmail API → Abilita).';
+  else if (hay.includes('insufficient') || hay.includes('scope'))
+    hint = 'manca il permesso di lettura. Scollega Gmail e ricollegalo spuntando la casella "Leggi i messaggi" nella schermata di consenso di Google.';
+  else if (hay.includes('ratelimit') || hay.includes('quota'))
+    hint = 'troppe richieste, riprova tra qualche minuto.';
+  else hint = msg || 'accesso negato da Google.';
+  const e = new Error(`Gmail ${r.status}: ${hint}`);
+  e.status = r.status; e.reason = reason;
+  return e;
+}
+
 async function gget(path, params) {
   const url = `${API}${path}${params ? '?' + new URLSearchParams(params) : ''}`;
   const r = await fetch(url, { headers: { Authorization: `Bearer ${await accessToken()}` } });
-  if (!r.ok) throw new Error(`Gmail ${r.status}`);
+  if (!r.ok) throw await gmailError(r);
   return r.json();
 }
 
