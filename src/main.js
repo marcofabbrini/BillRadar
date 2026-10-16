@@ -811,6 +811,7 @@ async function renderSettings() {
   view.querySelectorAll('input[data-color]').forEach((el) => (el.oninput = () => applyEcg(el.value)));
   // immobili e vetture
   const addA = $('#addAsset'); if (addA) addA.onclick = () => openAssetDialog();
+  const addC2 = $('#addCat2'); if (addC2) addC2.onclick = openCategoryDialog;
   const rev = $('#reverify'); if (rev) rev.onclick = async () => {
     const bar = $('#progress'); bar.hidden = false;
     try {
@@ -898,8 +899,8 @@ function assetSettingsHtml() {
   const list = assets();
   const rows = list.map((a) => `<div class="set-item" data-editasset="${a.id}" style="cursor:pointer"><div class="catline"><span class="ico" style="width:38px;height:38px;border-radius:12px;display:grid;place-items:center;font-size:18px;background:var(--acc-soft)">${KIND_ICON[a.kind]}</span><div><div>${esc(a.name)}</div><div class="hint">${KIND_LABEL[a.kind]}${a.holder ? ` · intestato a ${esc(a.holder)}` : ''}${a.address ? ` · ${esc(a.address)}` : ''}${a.match?.length ? ` · codici: ${esc(a.match.join(', '))}` : ''}</div></div></div>
       <div class="acts"><button class="icon-btn" data-delasset="${a.id}" aria-label="Elimina ${esc(a.name)}">🗑</button></div></div>`).join('');
-  return `${rows || '<div class="set-item mut">Nessun immobile o vettura. Aggiungili: ogni bolletta dovrà riferirsi a uno di essi.</div>'}
-    <div style="padding:12px 0;display:flex;gap:8px;flex-wrap:wrap"><button class="btn sec" id="addAsset" style="flex:1">+ Aggiungi immobile o vettura</button>${list.length ? '<button class="btn sec" id="reverify" style="flex:1">Verifica le bollette già presenti</button>' : ''}</div>
+  return `${rows || '<div class="set-item mut">Nessun immobile o vettura. Aggiungili: ogni bolletta dovrà riferirsi a uno di essi. Qui puoi anche creare nuove categorie.</div>'}
+    <div style="padding:12px 0;display:flex;gap:8px;flex-wrap:wrap"><button class="btn sec" id="addAsset" style="flex:1">+ Aggiungi immobile o vettura</button><button class="btn sec" id="addCat2" style="flex:1">+ Nuova categoria</button>${list.length ? '<button class="btn sec" id="reverify" style="flex:1">Verifica le bollette già presenti</button>' : ''}</div>
     <div class="hint" style="padding-bottom:10px">Le bollette si assegnano da sole solo se indirizzo e intestatario del documento coincidono con quelli registrati. Se più schede hanno lo stesso indirizzo (intestatari diversi) l\'assegnazione resta manuale.</div>`;
 }
 
