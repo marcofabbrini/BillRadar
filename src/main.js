@@ -8,7 +8,8 @@ import * as drive from './drive.js';
 import { renderPdf } from './pdf.js';
 import { pushWidget } from './widget.js';
 import { buildGmailQuery, invalidSenders } from './query.js';
-import { assets, assetById, assetLabel, loadAssets, saveAsset, removeAsset, countUnassigned, assignAllUnassigned, learnAssignment, KIND_LABEL, KIND_ICON } from './assets.js';
+import { assets, assetById, assetLabel, loadAssets, saveAsset, removeAsset, countUnassigned, assignAllUnassigned, learnAssignment, reverifyBills, KIND_LABEL, KIND_ICON } from './assets.js';
+import { REASON_TEXT } from './assetmatch.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const view = $('#view');
@@ -274,7 +275,9 @@ async function openBill(id) {
     <h2 style="margin:0 0 4px">${id ? 'Dettaglio documento' : 'Nuovo documento'}</h2>
     <label>Categoria</label><select data-k="category">${Object.entries(cats()).map(([k, c]) => `<option value="${k}" ${b.category === k ? 'selected' : ''}>${c.icon} ${c.label}</option>`).join('')}</select>
     <label>Immobile / vettura <b style="color:var(--bad)">*</b></label>
-    <select data-k="assetId" id="assetSel">${assetOptions(b.assetId || (id ? '' : (assetById(state.asset) ? state.asset : '')), { placeholder: assets().length ? '— scegli a cosa si riferisce —' : '— nessuno: aggiungilo in Impostazioni —' })}</select>
+    <select data-k="assetId" id="assetSel">${assetOptions(b.assetId || b.assetSuggest || (id ? '' : (assetById(state.asset) ? state.asset : '')), { placeholder: assets().length ? '— scegli a cosa si riferisce —' : '— nessuno: aggiungilo in Impostazioni —' })}</select>
+    ${!b.assetId && b.assetNote ? `<div class="hint" style="color:var(--warn,#ffb938);margin-top:6px">${esc(REASON_TEXT[b.assetNote] || '')}${b.assetSuggest ? ` Suggerito: ${esc(assetLabel(assetById(b.assetSuggest)))} (intestatario coincidente): controlla e conferma.` : ''}</div>` : ''}
+    ${field('holder', 'Intestatario (dal documento)')}${field('supplyAddress', 'Indirizzo fornitura (dal documento)')}
     ${field('supplier', 'Fornitore')}${field('amount', 'Importo (€)', 'number')}${field('consumption', 'Consumo', 'number')}
     ${field('issueDate', 'Data documento', 'date')}${field('periodFrom', 'Periodo da', 'date')}${field('periodTo', 'Periodo a', 'date')}
     ${field('dueDate', 'Scadenza', 'date')}${field('invoiceNumber', 'Numero documento')}
@@ -314,6 +317,7 @@ async function openBill(id) {
     if (!patch.assetId) { const sel = $('#assetSel', dlg); sel.classList.add('invalid'); sel.focus(); toast('Scegli a quale immobile o vettura si riferisce', 4000); return; }
     patch.unit = cat(patch.category).unit;
     patch.needsReview = false;
+    patch.assetBy = 'manual'; patch.assetNote = null; patch.assetSuggest = null;   // scelta confermata dall'utente
     const savedId = id || await addBill({ ...b, ...patch });
     if (id) await updateBill(id, patch);
     let note = '';
@@ -402,6 +406,14 @@ async function renderSettings() {
   view.querySelectorAll('input[data-color]').forEach((el) => (el.oninput = () => applyEcg(el.value)));
   // immobili e vetture
   const addA = $('#addAsset'); if (addA) addA.onclick = () => openAssetDialog();
+  const rev = $('#reverify'); if (rev) rev.onclick = async () => {
+    const bar = $('#progress'); bar.hidden = false;
+    try {
+      const r = await reverifyBills((i, n) => { $('div', bar).style.width = `${(i / n) * 100}%`; $('span', bar).textContent = `Verifico ${i}/${n}`; });
+      toast(r.total ? `Verificate ${r.total - r.noPdf}: ${r.assigned} assegnate, ${r.manual} da assegnare a mano${r.noPdf ? `; ${r.noPdf} senza PDF sul telefono (non verificabili)` : ''}` : 'Nessuna bolletta da verificare', 8000);
+    } catch (e) { toast(e.message, 6000); } finally { bar.hidden = true; }
+    route();
+  };
   view.querySelectorAll('[data-editasset]').forEach((el) => (el.onclick = () => openAssetDialog(el.dataset.editasset)));
   view.querySelectorAll('[data-delasset]').forEach((el) => (el.onclick = async (e) => {
     e.stopPropagation();
@@ -478,10 +490,11 @@ async function catSettingsHtml() {
 
 function assetSettingsHtml() {
   const list = assets();
-  const rows = list.map((a) => `<div class="set-item" data-editasset="${a.id}" style="cursor:pointer"><div class="catline"><span class="ico" style="width:38px;height:38px;border-radius:12px;display:grid;place-items:center;font-size:18px;background:var(--acc-soft)">${KIND_ICON[a.kind]}</span><div><div>${esc(a.name)}</div><div class="hint">${KIND_LABEL[a.kind]}${a.match?.length ? ` · riconosce: ${esc(a.match.join(', '))}` : ''}</div></div></div>
+  const rows = list.map((a) => `<div class="set-item" data-editasset="${a.id}" style="cursor:pointer"><div class="catline"><span class="ico" style="width:38px;height:38px;border-radius:12px;display:grid;place-items:center;font-size:18px;background:var(--acc-soft)">${KIND_ICON[a.kind]}</span><div><div>${esc(a.name)}</div><div class="hint">${KIND_LABEL[a.kind]}${a.holder ? ` · intestato a ${esc(a.holder)}` : ''}${a.address ? ` · ${esc(a.address)}` : ''}${a.match?.length ? ` · codici: ${esc(a.match.join(', '))}` : ''}</div></div></div>
       <div class="acts"><button class="icon-btn" data-delasset="${a.id}" aria-label="Elimina ${esc(a.name)}">🗑</button></div></div>`).join('');
   return `${rows || '<div class="set-item mut">Nessun immobile o vettura. Aggiungili: ogni bolletta dovrà riferirsi a uno di essi.</div>'}
-    <div style="padding:12px 0;display:flex;gap:8px"><button class="btn sec" id="addAsset" style="flex:1">+ Aggiungi immobile o vettura</button></div>`;
+    <div style="padding:12px 0;display:flex;gap:8px;flex-wrap:wrap"><button class="btn sec" id="addAsset" style="flex:1">+ Aggiungi immobile o vettura</button>${list.length ? '<button class="btn sec" id="reverify" style="flex:1">Verifica le bollette già presenti</button>' : ''}</div>
+    <div class="hint" style="padding-bottom:10px">Le bollette si assegnano da sole solo se indirizzo e intestatario del documento coincidono con quelli registrati. Se più schede hanno lo stesso indirizzo (intestatari diversi) l\'assegnazione resta manuale.</div>`;
 }
 
 function openAssetDialog(id = null) {
@@ -491,20 +504,28 @@ function openAssetDialog(id = null) {
     <h2 style="margin:0 0 4px">${a ? 'Modifica' : 'Nuovo'} immobile o vettura</h2>
     <label>Tipo</label><select id="as-kind"><option value="home" ${a?.kind !== 'car' ? 'selected' : ''}>🏠 Immobile</option><option value="car" ${a?.kind === 'car' ? 'selected' : ''}>🚗 Vettura</option></select>
     <label>Nome</label><input type="text" id="as-name" maxlength="30" placeholder="es. Casa, Casa al mare, Panda" autocomplete="off" value="${esc(a?.name || '')}">
-    <label>Parole di riconoscimento (facoltative)</label>
-    <input type="text" id="as-match" placeholder="es. via Roma 12, AB123CD, IT001E12345678" autocomplete="off" value="${esc((a?.match || []).join(', '))}">
-    <div class="hint" style="margin-top:6px">Separate da virgole: indirizzo, targa, codice POD/PDR… Se compaiono nel PDF, le nuove bollette trovate in Gmail vengono assegnate da sole.</div>
+    <label>Intestatario delle utenze</label>
+    <input type="text" id="as-holder" placeholder="es. Mario Rossi (come scritto in bolletta)" autocomplete="off" value="${esc(a?.holder || '')}">
+    <div id="as-addr-box"><label>Indirizzo della fornitura</label>
+    <input type="text" id="as-addr" placeholder="es. Via Roma 12, Milano" autocomplete="off" value="${esc(a?.address || '')}"></div>
+    <div class="hint" style="margin-top:6px">Le bollette vengono assegnate da sole solo se nel PDF compaiono sia l'indirizzo sia l'intestatario. Stesso indirizzo con intestatari diversi? Crea due schede: quelle bollette andranno assegnate a mano.</div>
+    <label>Codici di riconoscimento (facoltativi)</label>
+    <input type="text" id="as-match" placeholder="es. IT001E12345678, 12345678901234, AB123CD" autocomplete="off" value="${esc((a?.match || []).join(', '))}">
+    <div class="hint" style="margin-top:6px">Separati da virgole: POD, PDR, targa, numero contratto. Sono univoci: se compaiono nel PDF decidono da soli.</div>
     <div style="display:flex;gap:8px;margin-top:16px"><button class="btn" id="as-save">Salva</button><button class="btn sec" id="as-cancel">Annulla</button></div>`;
   dlg.showModal();
+  const syncKind = () => { $('#as-addr-box', dlg).hidden = $('#as-kind', dlg).value === 'car'; };
+  $('#as-kind', dlg).onchange = syncKind; syncKind();
   $('#as-cancel', dlg).onclick = () => dlg.close();
   $('#as-save', dlg).onclick = async () => {
     try {
       const wasEmpty = assets().length === 0;
-      const rec = await saveAsset({ id, kind: $('#as-kind', dlg).value, name: $('#as-name', dlg).value, match: $('#as-match', dlg).value });
+      const rec = await saveAsset({ id, kind: $('#as-kind', dlg).value, name: $('#as-name', dlg).value, holder: $('#as-holder', dlg).value, address: $('#as-addr', dlg).value, match: $('#as-match', dlg).value });
       dlg.close();
       const n = await countUnassigned();
       if (wasEmpty && n && confirm(`Assegnare a "${rec.name}" le ${n} bollette già presenti?`)) await assignAllUnassigned(rec.id);
-      toast('Salvato'); renderSettings();
+      const sameAddr = rec.address && assets().filter((x) => x.id !== rec.id && x.address && x.address.toLowerCase().replace(/\W+/g, '') === rec.address.toLowerCase().replace(/\W+/g, '')).length;
+      toast(sameAddr ? 'Salvato. Stesso indirizzo di un\'altra scheda: le bollette di quell\'indirizzo si assegnano a mano.' : 'Salvato', sameAddr ? 7000 : 3200); renderSettings();
     } catch (e) { toast(e.message, 4500); }
   };
 }

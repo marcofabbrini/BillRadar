@@ -7,8 +7,8 @@ import { pdfToText } from './pdf.js';
 import { parseBill } from './parser.js';
 import { loadCategories } from './categories.js';
 import { buildGmailQuery } from './query.js';
-import { pickAsset } from './assetmatch.js';
-import { loadAssets } from './assets.js';
+import { assignAsset } from './assetmatch.js';
+import { loadAssets, assignmentFields } from './assets.js';
 
 const SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
 // drive.file: l'app vede solo i file e le cartelle che crea lei (permesso non sensibile)
@@ -224,7 +224,7 @@ export async function sync(onProgress = () => {}, hooks = {}, opts = {}) {
         const record = {
           ...fields,
           issueDate: fields.issueDate || mailDate,
-          assetId: pickAsset({ text, category: fields.category, supplier: fields.supplier }, allAssets, rules)?.id || null,
+          ...assignmentFields(assignAsset({ text, category: fields.category, supplier: fields.supplier, holder: fields.holder, supplyAddress: fields.supplyAddress }, allAssets, rules)),
           messageId: msg.id, attachmentId: p.body.attachmentId,
           fileName: p.filename, subject, from, source: 'gmail',
         };

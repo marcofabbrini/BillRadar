@@ -67,12 +67,21 @@ Nota: con `drive.file` l'app non riusa una cartella "BillRadar" creata a mano; n
 
 ## Immobili e vetture
 
-In **Impostazioni → Immobili e vetture** aggiungi le case e le auto. **Ogni bolletta deve riferirsi a uno di essi** (campo obbligatorio nel dettaglio del documento).
+In **Impostazioni → Immobili e vetture** registri ogni casa o auto con **intestatario** delle utenze, **indirizzo della fornitura** e, se vuoi, **codici** (POD, PDR, targa, numero contratto). **Ogni bolletta deve riferirsi a uno di essi** (campo obbligatorio nel dettaglio del documento). Un titolare può avere più immobili: ciascuno ha la sua scheda e le utenze di tipo diverso (luce, gas, acqua…) finiscono all'immobile giusto in base all'indirizzo.
 
-- **Assegnazione automatica** alle nuove bollette trovate in Gmail, in quest'ordine: parole di riconoscimento dell'immobile/vettura presenti nel PDF (indirizzo, targa, codice POD/PDR…, da inserire nella scheda); la scelta fatta l'ultima volta per la stessa categoria e lo stesso fornitore; l'unico immobile (utenze) o l'unica vettura (bollo, manutenzione) se ce n'è uno solo. Altrimenti la bolletta resta "da assegnare".
-- Quando assegni una bolletta, la scelta viene applicata anche alle altre ancora senza bene con la stessa categoria e lo stesso fornitore.
-- **Filtro** per immobile/vettura in Home, Documenti, Statistiche e nell'elenco per categoria; in Home un avviso segnala le bollette da assegnare.
-- Eliminare un immobile o una vettura non cancella le bollette: tornano "da assegnare".
+Per ogni nuova bolletta trovata in Gmail l'app legge dal PDF intestatario e indirizzo di fornitura e li **verifica**, in quest'ordine:
+
+1. **Codici** (POD, PDR, targa…) presenti nel PDF: sono univoci e decidono da soli.
+2. **Indirizzo + intestatario**: se l'indirizzo coincide con un solo immobile e l'intestatario coincide (o non è registrato), la bolletta è assegnata.
+3. **Assegnazione manuale** (la bolletta resta "da assegnare", con il motivo e, se possibile, un suggerimento da confermare) quando:
+   - più schede hanno lo stesso indirizzo (intestatari diversi);
+   - l'indirizzo coincide ma l'intestatario del documento è diverso;
+   - il documento riporta un indirizzo che non è tra i tuoi immobili.
+4. Se il documento non riporta né indirizzo né intestatario e c'è un solo bene adatto (un immobile per le utenze, una vettura per bollo e manutenzione), viene assegnata a quello.
+
+Quando assegni a mano una bolletta, la scelta si estende solo alle altre ancora senza bene con **stessa categoria, fornitore, intestatario e indirizzo**: un titolare con più immobili non viene mai mescolato. **Verifica le bollette già presenti** rilegge i PDF sul telefono e riassegna quelle senza bene o assegnate in automatico (quelle scelte a mano non si toccano).
+
+Il **filtro** per immobile/vettura è in Home, Documenti, Statistiche e nell'elenco per categoria; in Home un avviso segnala le bollette da assegnare. Eliminare un immobile o una vettura non cancella le bollette: tornano "da assegnare".
 
 ## Personalizzazione
 

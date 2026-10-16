@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { parseBill, parseNumberIT, parseDateIT } from '../src/parser.js';
+import { parseBill, parseNumberIT, parseDateIT, extractHolder, extractAddress } from '../src/parser.js';
 
 let passed = 0;
 const t = (name, fn) => { fn(); passed++; console.log('ok  -', name); };
@@ -106,6 +106,21 @@ t('categoria personalizzata con parole chiave e unità', () => {
   assert.equal(r.category, 'condominio');
   assert.equal(r.amount, 215);
   assert.equal(r.consumption, 12);
+});
+
+t('intestatario e indirizzo di fornitura (valore sulla stessa riga)', () => {
+  const txt = 'Enel Energia\nIntestatario: ROSSI MARIO  Codice fiscale RSSMRA80A01H501Z\nIndirizzo di fornitura: Via Roma 12, 20100 Milano MI\nCodice POD IT001E1';
+  assert.equal(extractHolder(txt), 'ROSSI MARIO');
+  assert.equal(extractAddress(txt), 'Via Roma 12, 20100 Milano MI');
+});
+t('intestatario e indirizzo su righe separate', () => {
+  const txt = 'Intestatario\nBianchi Giulia\nPunto di fornitura\nViale dei Pini 3 - 47921 Rimini';
+  assert.equal(extractHolder(txt), 'Bianchi Giulia');
+  assert.equal(extractAddress(txt), 'Viale dei Pini 3 - 47921 Rimini');
+});
+t('senza etichette: nessun dato inventato', () => {
+  assert.equal(extractHolder('Totale da pagare 10 euro'), null);
+  assert.equal(extractAddress('Sede legale: Via Aurelia 1 Roma'), null);
 });
 
 console.log(`\n${passed} test superati`);

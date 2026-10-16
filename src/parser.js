@@ -162,6 +162,24 @@ export function extractSupplier(text) {
   return m ? m[1].trim() : null;
 }
 
+/** Intestatario del contratto, se indicato nel documento (etichetta + valore sulla stessa riga o su quella dopo). */
+export function extractHolder(text) {
+  const t = norm(text);
+  const m = t.match(/(?:intestatari[oa]|intestat[oa] a|titolare(?: del contratto| della fornitura)?|nominativo|spett\.?le|intestazione)\s*[:\-]?\s*\n?\s*([^\n\d]{3,60})/i);
+  if (!m) return null;
+  const v = m[1].replace(/\s+(?:codice fiscale|c\.?\s?f\b|p\.?\s?iva|via|viale|piazza|corso|indirizzo).*$/i, '').replace(/[.,;:\s]+$/, '').trim();
+  return v.length >= 3 ? v : null;
+}
+
+/** Indirizzo della fornitura (non quello del fornitore): solo se introdotto da un'etichetta esplicita. */
+export function extractAddress(text) {
+  const t = norm(text);
+  const m = t.match(/(?:indirizzo (?:di )?(?:fornitura|installazione)|punto di (?:fornitura|prelievo|riconsegna)|fornitura (?:presso|in|a)|luogo di fornitura|ubicazione(?: (?:della )?fornitura)?|sede di fornitura)\s*[:\-]?\s*\n?\s*([^\n]{5,90})/i);
+  if (!m) return null;
+  const v = m[1].replace(/\s+(?:codice pod|codice pdr|pod|pdr)\b.*$/i, '').replace(/[.,;:\s]+$/, '').trim();
+  return /[a-zà-ÿ]{3,}/i.test(v) && /\d/.test(v) ? v : null;
+}
+
 /** Punto d'ingresso: dal testo del PDF a un record strutturato. */
 export function parseBill(text, { subject = '', from = '', cats = CATEGORIES } = {}) {
   const clean = norm(text || '');
@@ -188,6 +206,7 @@ export function parseBill(text, { subject = '', from = '', cats = CATEGORIES } =
     periodFrom: period.from, periodTo: period.to,
     issueDate: issue, dueDate: due,
     supplier, invoiceNumber,
+    holder: extractHolder(clean), supplyAddress: extractAddress(clean),
     confidence: Math.round(conf * 100) / 100,
     needsReview: conf < 0.7 || amount == null,
     scores,

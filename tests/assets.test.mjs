@@ -1,42 +1,80 @@
 import assert from 'node:assert/strict';
-import { pickAsset, ruleKey } from '../src/assetmatch.js';
+import { assignAsset, pickAsset, ruleKey, matchAddress, matchHolder } from '../src/assetmatch.js';
 
 let passed = 0;
 const t = (name, fn) => { fn(); passed++; console.log('ok  -', name); };
 
-const casa = { id: 'h1', kind: 'home', name: 'Casa', match: ['via roma 12', 'IT001E12345678'] };
-const mare = { id: 'h2', kind: 'home', name: 'Casa al mare', match: ['via dei pini'] };
-const panda = { id: 'c1', kind: 'car', name: 'Panda', match: ['AB 123 CD'] };
+// Mario ha due immobili; Giulia (altra persona) ha una scheda allo stesso indirizzo di "Casa Mario"
+const casa = { id: 'h1', kind: 'home', name: 'Casa', holder: 'Mario Rossi', address: 'Via Roma 12, Milano', match: [] };
+const mare = { id: 'h2', kind: 'home', name: 'Casa al mare', holder: 'Mario Rossi', address: 'Viale dei Pini 3, Rimini', match: [] };
+const giulia = { id: 'h3', kind: 'home', name: 'Casa Giulia', holder: 'Giulia Bianchi', address: 'Via Verdi 5, Torino', match: [] };
+const cond = { id: 'h4', kind: 'home', name: 'Studio Rossi', holder: 'Anna Rossi', address: 'Via Roma 12, Milano', match: [] };
+const panda = { id: 'c1', kind: 'car', name: 'Panda', holder: 'Mario Rossi', match: ['AB 123 CD'] };
 
-t('nessun bene → nessuna assegnazione', () => assert.equal(pickAsset({ text: 'x' }, []), null));
-t('parola di riconoscimento nel testo', () => {
-  assert.equal(pickAsset({ text: 'Fornitura presso VIA DEI PINI 3', category: 'luce' }, [casa, mare, panda]).id, 'h2');
+const doc = (holder, addr, extra = '') => ({ text: `Enel Energia\nIntestatario: ${holder}\nIndirizzo di fornitura: ${addr}\n${extra}`, category: 'luce', supplier: 'Enel', holder, supplyAddress: addr });
+
+t('indirizzo e intestatario coincidono → assegnata', () => {
+  const r = assignAsset(doc('ROSSI MARIO', 'VIA ROMA 12 20100 MILANO MI'), [casa, mare, giulia]);
+  assert.equal(r.asset.id, 'h1'); assert.equal(r.reason, 'verified');
 });
-t('targa scritta con spazi/trattini diversi', () => {
-  assert.equal(pickAsset({ text: 'Targa AB-123-CD', category: 'bollo' }, [casa, mare, panda]).id, 'c1');
+t('stesso titolare, due immobili: ciascuna utenza va al suo indirizzo', () => {
+  assert.equal(assignAsset(doc('Mario Rossi', 'Viale dei Pini, 3 - 47921 Rimini'), [casa, mare]).asset.id, 'h2');
+  assert.equal(assignAsset(doc('Mario Rossi', 'Via Roma n. 12 Milano'), [casa, mare]).asset.id, 'h1');
 });
-t('codice POD senza spazi', () => {
-  assert.equal(pickAsset({ text: 'POD it001e12345678', category: 'luce' }, [casa, mare]).id, 'h1');
+t('intestatario diverso allo stesso indirizzo → manuale', () => {
+  const r = assignAsset(doc('Luigi Verdi', 'Via Roma 12 Milano'), [casa, mare]);
+  assert.equal(r.asset, null); assert.equal(r.reason, 'holder-mismatch'); assert.deepEqual(r.candidates, ['h1']);
 });
-t('regola imparata (categoria + fornitore)', () => {
-  const rules = { [ruleKey('luce', 'Enel Energia')]: 'h2' };
-  assert.equal(pickAsset({ text: '', category: 'luce', supplier: 'Enel Energia' }, [casa, mare], rules).id, 'h2');
+t('più intestatari allo stesso indirizzo → manuale (con suggerimento dall\'intestatario)', () => {
+  const r = assignAsset(doc('Anna Rossi', 'Via Roma 12 Milano'), [casa, cond, mare]);
+  assert.equal(r.asset, null); assert.equal(r.reason, 'shared-address');
+  assert.deepEqual(r.candidates.sort(), ['h1', 'h4']); assert.equal(r.suggested, 'h4');
 });
-t('il testo vince sulla regola', () => {
-  const rules = { [ruleKey('luce', 'Enel')]: 'h2' };
-  assert.equal(pickAsset({ text: 'via roma 12', category: 'luce', supplier: 'Enel' }, [casa, mare], rules).id, 'h1');
+t('indirizzo condiviso e intestatario non riconoscibile → manuale senza suggerimento', () => {
+  const r = assignAsset(doc('Qualcuno Altro', 'Via Roma 12 Milano'), [casa, cond]);
+  assert.equal(r.reason, 'shared-address'); assert.equal(r.suggested, null);
 });
-t('un solo immobile → utenze assegnate, bollo no se ci sono più beni', () => {
-  assert.equal(pickAsset({ category: 'gas' }, [casa, panda]).id, 'h1');
-  assert.equal(pickAsset({ category: 'bollo' }, [casa, panda]).id, 'c1');
+t('indirizzo del documento non registrato → manuale, mai a caso', () => {
+  const r = assignAsset(doc('Mario Rossi', 'Via Dante 9 Roma'), [casa, mare]);
+  assert.equal(r.asset, null); assert.equal(r.reason, 'address-unknown');
 });
-t('due immobili senza indizi → da assegnare', () => {
-  assert.equal(pickAsset({ category: 'luce' }, [casa, mare, panda]), null);
+t('civico diverso non coincide (12 ≠ 123)', () => {
+  assert.equal(matchAddress('Via Roma 123 Milano', 'Via Roma 12, Milano'), false);
+  assert.equal(matchAddress('Via Roma 12/A Milano', 'Via Roma 12, Milano'), true);
+  assert.equal(matchAddress('V.le dei Pini 3', 'Viale dei Pini 3'), true);
 });
-t('un solo bene in assoluto → usato per tutto', () => {
-  assert.equal(pickAsset({ category: 'altro' }, [casa]).id, 'h1');
+t('città diversa non coincide', () => assert.equal(matchAddress('Via Roma 12 Napoli', 'Via Roma 12, Milano'), false));
+t('nome: ordine libero, maiuscole e accenti indifferenti', () => {
+  assert.equal(matchHolder('Intestatario ROSSI MARIO', 'Mario Rossi'), true);
+  assert.equal(matchHolder('Intestatario Rossi Luca', 'Mario Rossi'), false);
+  assert.equal(matchHolder('qualsiasi', ''), null);
 });
-t('regola verso un bene eliminato viene ignorata', () => {
-  assert.equal(pickAsset({ category: 'luce', supplier: 'X' }, [casa, mare], { [ruleKey('luce', 'X')]: 'zzz' }), null);
+t('codice identificativo (targa) vince su tutto', () => {
+  assert.equal(assignAsset({ text: 'Targa AB-123-CD', category: 'bollo' }, [casa, mare, panda]).asset.id, 'c1');
+});
+t('codici uguali su due beni → manuale', () => {
+  const a = { id: 'x', kind: 'home', name: 'A', match: ['IT001E999'] }, b = { id: 'y', kind: 'home', name: 'B', match: ['IT001E999'] };
+  assert.equal(assignAsset({ text: 'POD IT001E999' }, [a, b]).reason, 'ambiguous');
+});
+t('senza indirizzo né intestatario sul documento: un solo immobile → assegnata', () => {
+  const r = assignAsset({ text: 'Canone fibra', category: 'internet', supplier: 'Fastweb' }, [casa, panda]);
+  assert.equal(r.asset.id, 'h1'); assert.equal(r.reason, 'single');
+});
+t('senza indizi e due immobili → da assegnare', () => {
+  assert.equal(assignAsset({ text: 'Canone fibra', category: 'internet' }, [casa, mare]).asset, null);
+});
+t('scelta imparata solo per beni senza indirizzo', () => {
+  const loose = { id: 'l1', kind: 'home', name: 'Vecchia', match: [] }, loose2 = { id: 'l2', kind: 'home', name: 'Altra', match: [] };
+  const rules = { [ruleKey('gas', 'Hera')]: 'l2' };
+  assert.equal(assignAsset({ category: 'gas', supplier: 'Hera' }, [loose, loose2], rules).asset.id, 'l2');
+  assert.equal(assignAsset({ category: 'gas', supplier: 'Hera' }, [casa, mare], { [ruleKey('gas', 'Hera')]: 'h1' }).asset, null);
+});
+t('un solo bene registrato con intestatario diverso sul documento → manuale', () => {
+  const r = assignAsset({ text: 'x', category: 'luce', holder: 'Luigi Verdi' }, [casa]);
+  assert.equal(r.asset, null); assert.equal(r.reason, 'holder-mismatch');
+});
+t('nessun bene → nessuna assegnazione; pickAsset restituisce solo il bene', () => {
+  assert.equal(pickAsset({ text: 'x' }, []), null);
+  assert.equal(pickAsset(doc('Mario Rossi', 'Via Roma 12 Milano'), [casa]).id, 'h1');
 });
 console.log(`\n${passed} test superati`);
