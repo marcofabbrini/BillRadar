@@ -108,6 +108,12 @@ Sotto i campi vedi la ricerca Gmail che ne risulta. Solo le mail con un PDF alle
 
 Ogni categoria è riferita a immobili o a vetture. **Immobili:** Luce, Gas, Acqua, Internet/Telefono, Acconti GSE. **Vetture:** Bollo, Manutenzione, Tagliando, Carburante, Assicurazione, Ricarica. Nel dettaglio di un documento, scegliendo la categoria l'elenco "Immobile / vettura" mostra solo i beni coerenti, e l'assegnazione automatica non abbina mai una bolletta di casa a un'auto o viceversa. Le categorie create da te hanno il campo "Si riferisce a" (immobili o vetture).
 
+## Eliminazione multipla e duplicati
+
+In **Documenti** e in **Spese**, "☑️ Seleziona" permette di spuntare più voci (o "Tutte" quelle filtrate) ed eliminarle in un colpo solo. Le bollette eliminate non vengono più riportate indietro dalla sincronizzazione con Gmail. I file già archiviati su Drive non vengono toccati.
+
+"🔍 Duplicati" (anche in Impostazioni → Dati) confronta i documenti: sono **sicuri** se hanno lo stesso allegato email, lo stesso file PDF (impronta SHA-256), lo stesso file su Drive o lo stesso numero con fornitore e importo; sono **probabili** se hanno stessa categoria, data e importo con fornitori compatibili. Per ogni gruppo l'app consiglia quale tenere (con PDF, assegnazione confermata a mano, pagata) e prepara l'eliminazione solo dei gruppi sicuri; in ogni gruppo ne resta sempre almeno uno.
+
 ## Spese personali e scontrini
 
 Oltre a immobili e vetture ci sono le **spese personali**, che non richiedono nessun immobile o vettura: **Spesa**, **Ristoranti**, **Spese informatica**, **Altre spese**. Per ognuna puoi creare le **sottocategorie** che vuoi (Impostazioni → Categorie → 🏷, oppure dal ＋ quando registri una spesa). Le categorie create da te possono essere "Spese personali" dal campo "Si riferisce a".

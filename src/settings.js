@@ -64,6 +64,7 @@ export const SETTINGS_SCHEMA = [
       { key: 'storage.info', type: 'storage', label: 'Spazio occupato' },
       { key: 'action.exportJson', type: 'action', label: 'Esporta backup (JSON)' },
       { key: 'action.exportCsv', type: 'action', label: 'Esporta tabella (CSV)' },
+      { key: 'action.dupes', type: 'action', label: 'Cerca documenti duplicati' },
       { key: 'action.import', type: 'action', label: 'Importa backup' },
       { key: 'action.wipe', type: 'action', label: 'Cancella tutti i dati', danger: true },
     ],

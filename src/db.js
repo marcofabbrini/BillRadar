@@ -24,13 +24,23 @@ export async function addBill(bill, pdfBlob = null) {
   return db.bills.add(rec);
 }
 
+// allegati di bollette eliminate: la sincronizzazione con Gmail non le riporta indietro
+const DELETED_KEY = 'deletedAttachments';
+
 export async function billExists(messageId, attachmentId) {
-  return !!(await db.bills.where('[messageId+attachmentId]').equals([messageId, attachmentId]).first());
+  if (await db.bills.where('[messageId+attachmentId]').equals([messageId, attachmentId]).first()) return true;
+  return (await getKV(DELETED_KEY, [])).includes(`${messageId}|${attachmentId}`);
 }
 
 export const listBills = () => db.bills.orderBy('issueDate').reverse().toArray();
 export const updateBill = (id, patch) => db.bills.update(id, patch);
-export const deleteBill = (id) => db.bills.delete(id);
+export async function deleteBills(ids) {
+  const rows = (await db.bills.bulkGet(ids)).filter(Boolean);
+  const keys = rows.filter((r) => r.messageId && r.attachmentId).map((r) => `${r.messageId}|${r.attachmentId}`);
+  if (keys.length) await setKV(DELETED_KEY, [...new Set([...(await getKV(DELETED_KEY, [])), ...keys])].slice(-5000));
+  await db.bills.bulkDelete(ids);
+}
+export const deleteBill = (id) => deleteBills([id]);
 
 export const listOffers = () => db.offers.orderBy('createdAt').reverse().toArray();
 export const addOffer = (o, pdf = null) => db.offers.add({ ...o, pdf: pdf || null, createdAt: Date.now() });

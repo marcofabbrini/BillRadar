@@ -1,7 +1,8 @@
 import './style.css';
 import { cats, loadCategories, addCategory, removeCategory, SCOPES, SCOPE_LABEL, SCOPE_ICON, needsAsset, subcats, addSubcat, removeSubcat } from './categories.js';
 import { toNum, round2, bySubcategory } from './receipt.js';
-import { db, listBills, addBill, updateBill, deleteBill, exportAll, importAll, wipeAll, billsToCSV, getKV, setKV } from './db.js';
+import { findDuplicates, sha256 } from './dupes.js';
+import { db, listBills, addBill, updateBill, deleteBill, deleteBills, exportAll, importAll, wipeAll, billsToCSV, getKV, setKV } from './db.js';
 import { SETTINGS_SCHEMA, getSetting, setSetting, allSettings } from './settings.js';
 import { eur, num, MONTH_LABELS, years, monthlyByCategory, totals, consumption, yoy, upcoming } from './stats.js';
 import * as gmail from './gmail.js';
@@ -276,7 +277,7 @@ async function renderHome() {
 function billRow(b, showDue = false) {
   const c = cat(b.category);
   const sub = showDue ? `Scade ${fmtDate(b.dueDate)}` : `${fmtDate(b.issueDate)} · ${esc(b.supplier || b.fileName || '')}`;
-  return `<div class="row" data-id="${b.id}"><div class="ico" style="background:${c.color}22">${c.icon}</div>
+  return `<div class="row ${sel.on && sel.ids.has(b.id) ? 'picked' : ''}" data-id="${b.id}">${selBox(b.id)}<div class="ico" style="background:${c.color}22">${c.icon}</div>
     <div class="grow"><div class="t">${c.label}${b.needsReview ? ' <span class="tag">verifica</span>' : ''} ${assetTag(b)}</div><div class="s">${sub}</div></div>
     <b class="${c.kind === 'income' ? 'pos' : ''}">${c.kind === 'income' ? '+' : ''}${eur(b.amount)}</b></div>`;
 }
@@ -293,15 +294,17 @@ async function renderDocs() {
   view.innerHTML = `
     <input type="search" id="q" placeholder="Cerca fornitore, numero…" value="${esc(state.q)}">
     ${assets().length ? `<div style="margin-top:10px">${assetSelect()}</div>` : ''}
+    <div class="asel" style="margin-top:10px"><button class="btn sec" id="selMode">${sel.on ? '✕ Esci dalla selezione' : '☑️ Seleziona'}</button><button class="btn sec" id="dupBtn">🔍 Duplicati</button></div>
     <div class="chips" style="margin-top:10px">
       ${[['all', 'Tutti'], ...(state.newIds.size ? [['new', 'Nuove']] : []), ...(assets().length ? [['unassigned', 'Da assegnare']] : []), ['review', 'Da verificare'], ...ids.map((id) => [id, cat(id).label])].map(([k, l]) => `<button class="chip ${f === k ? 'on' : ''}" data-f="${k}">${l}</button>`).join('')}
     </div>
     <div class="card enter" style="--i:1">${rows.length ? rows.map((b) => billRow(b)).join('') : emptyState('Nessun documento', 'Qui compariranno le bollette trovate in Gmail.')}</div>
-    <button class="btn" id="add" style="width:100%">+ Aggiungi manualmente</button>`;
+    <button class="btn" id="add" style="width:100%">+ Aggiungi manualmente</button>${sel.on ? selBarHtml() : ''}`;
   bindAssetSelect(renderDocs);
   $('#q').oninput = (e) => { state.q = e.target.value; clearTimeout(renderDocs.t); renderDocs.t = setTimeout(renderDocs, 250); };
   view.querySelectorAll('.chip').forEach((c) => (c.onclick = () => { state.filter = c.dataset.f; renderDocs(); }));
-  view.querySelectorAll('.row[data-id]').forEach((r) => (r.onclick = () => openBill(Number(r.dataset.id))));
+  wireSelection({ selector: '.row[data-id]', attr: 'id', open: openBill, visibleIds: rows.map((b) => b.id), rerender: renderDocs });
+  $('#dupBtn').onclick = openDupes;
   $('#add').onclick = () => openBill(null);
 }
 
@@ -455,6 +458,90 @@ async function renderStats() {
   $('#yr').onchange = (e) => { state.year = Number(e.target.value); renderStats(); };
 }
 
+// ---------- Selezione multipla ed eliminazione ----------
+const sel = { on: false, ids: new Set() };
+const selBox = (id) => (sel.on ? `<input type="checkbox" class="selbox" ${sel.ids.has(id) ? 'checked' : ''} tabindex="-1" aria-label="Seleziona">` : '');
+const selBarHtml = () => '<div class="selbar" id="selBar"><b id="selCount"></b><button class="btn sec" id="selAll"></button><button class="btn danger" id="selDel">🗑 Elimina</button></div><div style="height:70px"></div>';
+
+function wireSelection({ selector, attr, open, visibleIds, rerender }) {
+  const mode = $('#selMode');
+  if (mode) mode.onclick = () => { sel.on = !sel.on; sel.ids.clear(); rerender(); };
+  const bar = $('#selBar');
+  const refresh = () => {
+    if (!bar) return;
+    const n = sel.ids.size;
+    $('#selCount', bar).textContent = `${n} selezionat${n === 1 ? 'a' : 'e'}`;
+    $('#selDel', bar).disabled = !n;
+    $('#selAll', bar).textContent = n && n === visibleIds.length ? 'Nessuna' : `Tutte (${visibleIds.length})`;
+  };
+  view.querySelectorAll(selector).forEach((r) => (r.onclick = () => {
+    const id = Number(r.dataset[attr]);
+    if (!sel.on) return open(id);
+    if (sel.ids.has(id)) sel.ids.delete(id); else sel.ids.add(id);
+    r.classList.toggle('picked', sel.ids.has(id));
+    const cb = r.querySelector('.selbox'); if (cb) cb.checked = sel.ids.has(id);
+    refresh();
+  }));
+  if (!bar) return;
+  $('#selAll', bar).onclick = () => { if (sel.ids.size === visibleIds.length) sel.ids.clear(); else visibleIds.forEach((i) => sel.ids.add(i)); rerender(); };
+  $('#selDel', bar).onclick = async () => {
+    const n = sel.ids.size;
+    if (!n || !confirm(`Eliminare ${n} ${n === 1 ? 'voce' : 'voci'}? Non si può annullare.`)) return;
+    await deleteBills([...sel.ids]);
+    sel.on = false; sel.ids.clear();
+    toast(n === 1 ? 'Voce eliminata' : `${n} voci eliminate`);
+    rerender();
+  };
+  refresh();
+}
+
+// ---------- Duplicati ----------
+const SOURCE_LABEL = { gmail: 'Gmail', manuale: 'manuale', scontrino: 'spesa', drive: 'Drive' };
+
+async function openDupes() {
+  const dlg = $('#dlg');
+  toast('Confronto i documenti…', 2500);
+  const all = await db.bills.toArray();
+  // impronta del PDF, calcolata una sola volta per documento: riconosce lo stesso file arrivato due volte
+  for (const b of all) {
+    if (b.pdf && !b.pdfHash) { try { b.pdfHash = await sha256(await b.pdf.arrayBuffer()); await db.bills.update(b.id, { pdfHash: b.pdfHash }); } catch { /* PDF illeggibile: si confronta sui dati */ } }
+  }
+  const groups = findDuplicates(all);
+  const del = new Set();   // i gruppi "sicuri" arrivano già preparati; quelli "probabili" li decidi tu
+  groups.forEach((g) => { if (g.strong) g.ids.forEach((id) => { if (id !== g.keep) del.add(id); }); });
+  const nStrong = groups.filter((g) => g.strong).length;
+  const memberRow = (g, b) => {
+    const a = assetById(b.assetId);
+    return `<label class="row dupr"><input type="checkbox" class="selbox" data-del="${b.id}" ${del.has(b.id) ? 'checked' : ''}>
+      <div class="grow"><div class="t">${cat(b.category).icon} ${esc(cat(b.category).label)} · ${eur(b.amount)} ${b.id === g.keep ? '<span class="tag2">consigliato da tenere</span>' : ''}</div>
+      <div class="s">${fmtDate(b.issueDate)} · ${esc(b.supplier || b.fileName || '—')}${b.invoiceNumber ? ` · n. ${esc(b.invoiceNumber)}` : ''} · ${SOURCE_LABEL[b.source] || esc(b.source || '')} · ${b.pdf ? 'PDF sul telefono' : b.driveFileId ? 'PDF su Drive' : 'senza PDF'}${a ? ` · ${esc(assetLabel(a))}` : ''}</div></div></label>`;
+  };
+  dlg.innerHTML = `<h2 style="margin:0 0 4px">Documenti duplicati</h2>
+    ${groups.length ? `<div class="hint" style="margin-bottom:8px">Trovati ${groups.length} grupp${groups.length === 1 ? 'o' : 'i'} (${nStrong} sicur${nStrong === 1 ? 'o' : 'i'}, ${groups.length - nStrong} probabil${groups.length - nStrong === 1 ? 'e' : 'i'}). Spunta ciò che vuoi eliminare: in ogni gruppo ne resta sempre almeno uno. I gruppi sicuri sono già preparati; controlla quelli probabili.</div>
+      ${groups.map((g, i) => `<div class="card dupg" data-g="${i}" style="margin:8px 0"><div class="s" style="margin-bottom:4px"><span class="${g.strong ? 'tag' : 'tag2'}">${g.strong ? 'sicuro' : 'probabile'}</span> ${esc(g.reasons.join(', '))}</div>${g.bills.map((b) => memberRow(g, b)).join('')}</div>`).join('')}`
+      : '<div class="s" style="padding:8px 0">Nessun duplicato trovato: nessuna coppia di documenti con stesso file, numero, importo e data.</div>'}
+    <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">${groups.length ? '<button class="btn danger" id="dp-del"></button>' : ''}<button class="btn sec" id="dp-close">Chiudi</button></div>`;
+  dlg.showModal();
+  const refresh = () => { const b = $('#dp-del', dlg); if (b) { b.textContent = `🗑 Elimina ${del.size}`; b.disabled = !del.size; } };
+  dlg.querySelectorAll('[data-del]').forEach((cb) => (cb.onchange = () => {
+    const id = Number(cb.dataset.del), g = groups[Number(cb.closest('.dupg').dataset.g)];
+    if (cb.checked) {
+      if (g.ids.every((x) => x === id || del.has(x))) { cb.checked = false; toast('In ogni gruppo ne deve restare almeno uno', 3000); return; }
+      del.add(id);
+    } else del.delete(id);
+    refresh();
+  }));
+  $('#dp-close', dlg).onclick = () => dlg.close();
+  const delBtn = $('#dp-del', dlg);
+  if (delBtn) delBtn.onclick = async () => {
+    const n = del.size;
+    if (!n || !confirm(`Eliminare ${n} ${n === 1 ? 'documento' : 'documenti'} duplicat${n === 1 ? 'o' : 'i'}? Non si può annullare.`)) return;
+    await deleteBills([...del]);
+    dlg.close(); toast(n === 1 ? 'Duplicato eliminato' : `${n} duplicati eliminati`); route();
+  };
+  refresh();
+}
+
 // ---------- Spese personali: scontrini e sottocategorie ----------
 const expCats = () => Object.entries(cats()).filter(([, c]) => c.scope === 'exp').map(([id]) => id);
 const eurIn = (n) => new Intl.NumberFormat('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
@@ -546,9 +633,10 @@ async function renderSpese() {
     <div class="card enter" style="--i:3"><div class="row" style="border:0"><div class="grow"><div class="t">${rows.length} spes${rows.length === 1 ? 'a' : 'e'}</div><div class="s">${esc(period)}${sp.c !== 'all' ? ` · ${esc(cat(sp.c).label)}` : ''}</div></div><b style="font-size:20px">${eur(tot)}</b></div>
       ${sp.c === 'all' ? perCat.map(([id, v]) => `<div class="row pr"><span class="catdot" style="background:${cat(id).color}"></span><div class="grow"><div class="t">${esc(cat(id).label)}</div><div class="bar"><i style="width:${Math.max(3, (v / maxCat) * 100)}%;background:${cat(id).color}"></i></div></div><b>${eur(v)}</b></div>`).join('') : `<button class="btn sec" id="spSubs" style="width:100%;margin-top:8px">🏷 Gestisci sottocategorie di ${esc(cat(sp.c).label)}</button>`}</div>
     ${sp.c !== 'all' ? subBreakdownCard(rows, 4) : ''}
-    <div class="card enter" style="--i:5">${rows.length ? rows.map((b) => `<div class="row" data-sid="${b.id}"><div class="ico" style="background:${cat(b.category).color}22">${cat(b.category).icon}</div>
+    <div class="asel" style="margin-bottom:10px"><button class="btn sec" id="selMode">${sel.on ? '✕ Esci dalla selezione' : '☑️ Seleziona'}</button></div>
+    <div class="card enter" style="--i:5">${rows.length ? rows.map((b) => `<div class="row ${sel.on && sel.ids.has(b.id) ? 'picked' : ''}" data-sid="${b.id}">${selBox(b.id)}<div class="ico" style="background:${cat(b.category).color}22">${cat(b.category).icon}</div>
       <div class="grow"><div class="t">${esc(b.supplier || cat(b.category).label)} ${b.subcategory ? `<span class="tag2">${esc(b.subcategory)}</span>` : ''}${b.photo ? ' 📷' : ''}</div><div class="s">${fmtDate(b.issueDate)}${sp.c === 'all' ? ` · ${esc(cat(b.category).label)}` : ''}${b.receipt?.items?.length ? ` · ${b.receipt.items.length} righe` : ''}</div></div><b>${eur(b.amount)}</b></div>`).join('')
-      : emptyState('Nessuna spesa', 'Fotografa uno scontrino o aggiungi una spesa a mano.')}</div>`;
+      : emptyState('Nessuna spesa', 'Fotografa uno scontrino o aggiungi una spesa a mano.')}</div>${sel.on ? selBarHtml() : ''}`;
   $('#spy').onchange = (e) => { sp.y = e.target.value; renderSpese(); };
   $('#spm').onchange = (e) => { sp.m = e.target.value; renderSpese(); };
   view.querySelectorAll('[data-c]').forEach((c) => (c.onclick = () => { sp.c = c.dataset.c; renderSpese(); }));
@@ -557,7 +645,7 @@ async function renderSpese() {
   $('#spPhoto').onclick = () => $('#spFile').click();
   $('#spNew').onclick = () => openReceipt(null);
   $('#spFile').onchange = async (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) openReceipt(null, await shrinkImage(f)); };
-  view.querySelectorAll('[data-sid]').forEach((r) => (r.onclick = () => (async () => { const b = await db.bills.get(Number(r.dataset.sid)); return b.source === 'scontrino' ? openReceipt(b.id) : openBill(b.id); })()));
+  wireSelection({ selector: '[data-sid]', attr: 'sid', open: async (id) => { const b = await db.bills.get(id); return b.source === 'scontrino' ? openReceipt(b.id) : openBill(b.id); }, visibleIds: rows.map((b) => b.id), rerender: renderSpese });
 }
 
 async function openReceipt(id, newPhoto = null) {
@@ -1036,6 +1124,7 @@ async function runAction(key) {
       } finally { bar.hidden = true; }
       route();
     } else if (key === 'action.exportJson') download(`billradar-${Date.now()}.json`, JSON.stringify(await exportAll(), null, 2), 'application/json');
+    else if (key === 'action.dupes') openDupes();
     else if (key === 'action.exportCsv') download(`billradar-${Date.now()}.csv`, billsToCSV(await listBills()), 'text/csv');
     else if (key === 'action.import') {
       const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'application/json';
@@ -1154,6 +1243,7 @@ function hideSplash() {
 function applyTheme(t) { document.documentElement.dataset.theme = t || 'auto'; }
 async function route() {
   const [tab, arg] = (location.hash.replace('#/', '') || 'home').split('/');
+  sel.on = false; sel.ids.clear();   // la selezione multipla vale solo per la schermata in cui è stata attivata
   document.querySelectorAll('.tabs a').forEach((a) => a.classList.toggle('on', a.dataset.tab === (tab === 'cat' ? 'home' : tab)));
   moveIndicator();
   if (tab === 'cat') renderCat(decodeURIComponent(arg || '')); else ({ home: renderHome, docs: renderDocs, stats: renderStats, prices: renderPrices, spese: renderSpese, settings: renderSettings }[tab] || renderHome)();

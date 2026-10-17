@@ -1,12 +1,12 @@
 {
   "name": "billradar",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test": "node tests/parser.test.mjs && node tests/query.test.mjs && node tests/assets.test.mjs && node tests/prices.test.mjs && node tests/receipt.test.mjs",
+    "test": "node tests/parser.test.mjs && node tests/query.test.mjs && node tests/assets.test.mjs && node tests/prices.test.mjs && node tests/receipt.test.mjs && node tests/dupes.test.mjs",
     "sync": "npm run build && npx cap sync android"
   },
   "dependencies": {
