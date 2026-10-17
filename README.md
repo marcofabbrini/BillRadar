@@ -112,7 +112,9 @@ Ogni categoria è riferita a immobili o a vetture. **Immobili:** Luce, Gas, Acqu
 
 In **Documenti** e in **Spese**, "☑️ Seleziona" permette di spuntare più voci (o "Tutte" quelle filtrate) ed eliminarle in un colpo solo. Le bollette eliminate non vengono più riportate indietro dalla sincronizzazione con Gmail. I file già archiviati su Drive non vengono toccati.
 
-"🔍 Duplicati" (anche in Impostazioni → Dati) confronta i documenti: sono **sicuri** se hanno lo stesso allegato email, lo stesso file PDF (impronta SHA-256), lo stesso file su Drive o lo stesso numero con fornitore e importo; sono **probabili** se hanno stessa categoria, data e importo con fornitori compatibili. Per ogni gruppo l'app consiglia quale tenere (con PDF, assegnazione confermata a mano, pagata) e prepara l'eliminazione solo dei gruppi sicuri; in ogni gruppo ne resta sempre almeno uno.
+"🔍 Duplicati" (anche in Impostazioni → Dati) confronta i documenti partendo dal **periodo di fatturazione** (o, se manca, dalla data del documento) a parità di categoria; poi controlla importo, fornitore, numero documento e immobile/vettura. **Sicuri:** stesso file (allegato email, PDF, Drive), stesso numero con fornitore e importo, oppure stesso periodo con stesso fornitore e importo. **Da controllare:** stesso periodo e fornitore ma importo diverso, o stessa data e importo. Mai duplicati: fornitori, numeri documento, periodi o beni diversi. Per ogni gruppo l'app consiglia quale tenere (con PDF, assegnazione confermata a mano, pagata) e prepara l'eliminazione solo dei gruppi sicuri; in ogni gruppo ne resta sempre almeno uno.
+
+Con **"✓ Non è un duplicato"** la scelta viene ricordata (anche nel backup): quei documenti non vengono più proposti. "Ripristina esclusioni" azzera la lista.
 
 ## Spese personali e scontrini
 

@@ -1,7 +1,7 @@
 import './style.css';
 import { cats, loadCategories, addCategory, removeCategory, SCOPES, SCOPE_LABEL, SCOPE_ICON, needsAsset, subcats, addSubcat, removeSubcat } from './categories.js';
 import { toNum, round2, bySubcategory } from './receipt.js';
-import { findDuplicates, sha256 } from './dupes.js';
+import { findDuplicates, sha256, pairKey } from './dupes.js';
 import { db, listBills, addBill, updateBill, deleteBill, deleteBills, exportAll, importAll, wipeAll, billsToCSV, getKV, setKV } from './db.js';
 import { SETTINGS_SCHEMA, getSetting, setSetting, allSettings } from './settings.js';
 import { eur, num, MONTH_LABELS, years, monthlyByCategory, totals, consumption, yoy, upcoming } from './stats.js';
@@ -506,40 +506,55 @@ async function openDupes() {
   for (const b of all) {
     if (b.pdf && !b.pdfHash) { try { b.pdfHash = await sha256(await b.pdf.arrayBuffer()); await db.bills.update(b.id, { pdfHash: b.pdfHash }); } catch { /* PDF illeggibile: si confronta sui dati */ } }
   }
-  const groups = findDuplicates(all);
-  const del = new Set();   // i gruppi "sicuri" arrivano già preparati; quelli "probabili" li decidi tu
-  groups.forEach((g) => { if (g.strong) g.ids.forEach((id) => { if (id !== g.keep) del.add(id); }); });
-  const nStrong = groups.filter((g) => g.strong).length;
-  const memberRow = (g, b) => {
-    const a = assetById(b.assetId);
-    return `<label class="row dupr"><input type="checkbox" class="selbox" data-del="${b.id}" ${del.has(b.id) ? 'checked' : ''}>
-      <div class="grow"><div class="t">${cat(b.category).icon} ${esc(cat(b.category).label)} · ${eur(b.amount)} ${b.id === g.keep ? '<span class="tag2">consigliato da tenere</span>' : ''}</div>
-      <div class="s">${fmtDate(b.issueDate)} · ${esc(b.supplier || b.fileName || '—')}${b.invoiceNumber ? ` · n. ${esc(b.invoiceNumber)}` : ''} · ${SOURCE_LABEL[b.source] || esc(b.source || '')} · ${b.pdf ? 'PDF sul telefono' : b.driveFileId ? 'PDF su Drive' : 'senza PDF'}${a ? ` · ${esc(assetLabel(a))}` : ''}</div></div></label>`;
-  };
-  dlg.innerHTML = `<h2 style="margin:0 0 4px">Documenti duplicati</h2>
-    ${groups.length ? `<div class="hint" style="margin-bottom:8px">Trovati ${groups.length} grupp${groups.length === 1 ? 'o' : 'i'} (${nStrong} sicur${nStrong === 1 ? 'o' : 'i'}, ${groups.length - nStrong} probabil${groups.length - nStrong === 1 ? 'e' : 'i'}). Spunta ciò che vuoi eliminare: in ogni gruppo ne resta sempre almeno uno. I gruppi sicuri sono già preparati; controlla quelli probabili.</div>
-      ${groups.map((g, i) => `<div class="card dupg" data-g="${i}" style="margin:8px 0"><div class="s" style="margin-bottom:4px"><span class="${g.strong ? 'tag' : 'tag2'}">${g.strong ? 'sicuro' : 'probabile'}</span> ${esc(g.reasons.join(', '))}</div>${g.bills.map((b) => memberRow(g, b)).join('')}</div>`).join('')}`
-      : '<div class="s" style="padding:8px 0">Nessun duplicato trovato: nessuna coppia di documenti con stesso file, numero, importo e data.</div>'}
-    <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">${groups.length ? '<button class="btn danger" id="dp-del"></button>' : ''}<button class="btn sec" id="dp-close">Chiudi</button></div>`;
-  dlg.showModal();
-  const refresh = () => { const b = $('#dp-del', dlg); if (b) { b.textContent = `🗑 Elimina ${del.size}`; b.disabled = !del.size; } };
-  dlg.querySelectorAll('[data-del]').forEach((cb) => (cb.onchange = () => {
-    const id = Number(cb.dataset.del), g = groups[Number(cb.closest('.dupg').dataset.g)];
-    if (cb.checked) {
-      if (g.ids.every((x) => x === id || del.has(x))) { cb.checked = false; toast('In ogni gruppo ne deve restare almeno uno', 3000); return; }
-      del.add(id);
-    } else del.delete(id);
+  const draw = async () => {
+    const ignored = new Set(await getKV('notDupes', []));   // coppie confermate "non è un duplicato"
+    const groups = findDuplicates(all, { ignore: ignored });
+    const del = new Set();   // i gruppi "sicuri" arrivano già preparati; quelli "probabili" li decidi tu
+    groups.forEach((g) => g.presetIds.forEach((id) => del.add(id)));
+    const nStrong = groups.filter((g) => g.strong).length;
+    const memberRow = (g, b) => {
+      const a = assetById(b.assetId);
+      const per = b.periodFrom && b.periodTo ? `periodo ${fmtDate(b.periodFrom)}–${fmtDate(b.periodTo)}` : `del ${fmtDate(b.issueDate)}`;
+      return `<label class="row dupr"><input type="checkbox" class="selbox" data-del="${b.id}" ${del.has(b.id) ? 'checked' : ''}>
+        <div class="grow"><div class="t">${cat(b.category).icon} ${esc(cat(b.category).label)} · ${eur(b.amount)} ${g.keepIds.includes(b.id) ? '<span class="tag2">consigliato da tenere</span>' : ''}</div>
+        <div class="s">${per}${b.periodFrom && b.periodTo ? ` · emessa ${fmtDate(b.issueDate)}` : ''} · ${esc(b.supplier || b.fileName || '—')}${b.invoiceNumber ? ` · n. ${esc(b.invoiceNumber)}` : ''} · ${SOURCE_LABEL[b.source] || esc(b.source || '')} · ${b.pdf ? 'PDF sul telefono' : b.driveFileId ? 'PDF su Drive' : 'senza PDF'}${a ? ` · ${esc(assetLabel(a))}` : ''}</div></div></label>`;
+    };
+    dlg.innerHTML = `<h2 style="margin:0 0 4px">Documenti duplicati</h2>
+      ${groups.length ? `<div class="hint" style="margin-bottom:8px">Trovati ${groups.length} grupp${groups.length === 1 ? 'o' : 'i'} (${nStrong} sicur${nStrong === 1 ? 'o' : 'i'}, ${groups.length - nStrong} da controllare). Il confronto parte dal periodo di fatturazione (o dalla data), poi guarda importo, fornitore e numero. Spunta ciò che vuoi eliminare: in ogni gruppo ne resta sempre almeno uno. Se non sono duplicati, tocca "Non è un duplicato": non verranno più proposti.</div>
+        ${groups.map((g, i) => `<div class="card dupg" data-g="${i}" style="margin:8px 0"><div class="s" style="margin-bottom:4px"><span class="${g.strong ? 'tag' : 'tag2'}">${g.strong ? 'sicuro' : 'da controllare'}</span> ${esc(g.reasons.join(' · '))}</div>${g.bills.map((b) => memberRow(g, b)).join('')}
+          <button class="btn sec" data-keep="${i}" style="width:100%;margin-top:8px">✓ Non è un duplicato</button></div>`).join('')}`
+        : '<div class="s" style="padding:8px 0">Nessun duplicato trovato: nessuna coppia con stessa categoria e stesso periodo (o data) e dati compatibili.</div>'}
+      <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">${groups.length ? '<button class="btn danger" id="dp-del"></button>' : ''}${ignored.size ? `<button class="btn sec" id="dp-reset">Ripristina esclusioni (${ignored.size})</button>` : ''}<button class="btn sec" id="dp-close">Chiudi</button></div>`;
+    if (!dlg.open) dlg.showModal();
+    const refresh = () => { const b = $('#dp-del', dlg); if (b) { b.textContent = `🗑 Elimina ${del.size}`; b.disabled = !del.size; } };
+    dlg.querySelectorAll('[data-del]').forEach((cb) => (cb.onchange = () => {
+      const id = Number(cb.dataset.del), g = groups[Number(cb.closest('.dupg').dataset.g)];
+      if (cb.checked) {
+        if (g.ids.every((x) => x === id || del.has(x))) { cb.checked = false; toast('In ogni gruppo ne deve restare almeno uno', 3000); return; }
+        del.add(id);
+      } else del.delete(id);
+      refresh();
+    }));
+    // "non è un duplicato": tutte le coppie del gruppo vengono ricordate e saltate nelle ricerche successive
+    dlg.querySelectorAll('[data-keep]').forEach((bt) => (bt.onclick = async () => {
+      const g = groups[Number(bt.dataset.keep)], cur = new Set(await getKV('notDupes', []));
+      for (let x = 0; x < g.bills.length; x++) for (let y = x + 1; y < g.bills.length; y++) cur.add(pairKey(g.bills[x], g.bills[y]));
+      await setKV('notDupes', [...cur]);
+      toast('Confermato: non sono duplicati'); draw();
+    }));
+    const rs = $('#dp-reset', dlg);
+    if (rs) rs.onclick = async () => { if (confirm('Ripristinare le esclusioni? I documenti confermati come "non duplicati" potranno essere proposti di nuovo.')) { await setKV('notDupes', []); draw(); } };
+    $('#dp-close', dlg).onclick = () => dlg.close();
+    const delBtn = $('#dp-del', dlg);
+    if (delBtn) delBtn.onclick = async () => {
+      const n = del.size;
+      if (!n || !confirm(`Eliminare ${n} ${n === 1 ? 'documento' : 'documenti'} duplicat${n === 1 ? 'o' : 'i'}? Non si può annullare.`)) return;
+      await deleteBills([...del]);
+      dlg.close(); toast(n === 1 ? 'Duplicato eliminato' : `${n} duplicati eliminati`); route();
+    };
     refresh();
-  }));
-  $('#dp-close', dlg).onclick = () => dlg.close();
-  const delBtn = $('#dp-del', dlg);
-  if (delBtn) delBtn.onclick = async () => {
-    const n = del.size;
-    if (!n || !confirm(`Eliminare ${n} ${n === 1 ? 'documento' : 'documenti'} duplicat${n === 1 ? 'o' : 'i'}? Non si può annullare.`)) return;
-    await deleteBills([...del]);
-    dlg.close(); toast(n === 1 ? 'Duplicato eliminato' : `${n} duplicati eliminati`); route();
   };
-  refresh();
+  await draw();
 }
 
 // ---------- Spese personali: scontrini e sottocategorie ----------
