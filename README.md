@@ -150,3 +150,7 @@ npm test          # test del parser
 npm run dev       # anteprima nel browser (Gmail disponibile solo nell'APK)
 npm run build && npx cap sync android
 ```
+
+## Filtro per tipologia e caricamento di file
+- Nel selettore dei beni (Home, Documenti, Statistiche…) il gruppo **Per tipologia** permette di vedere tutte le vetture, tutti gli immobili, "Altro" o le Spese: le categorie e i totali mostrati sono solo quelli della tipologia scelta (con le vetture non compare "Acqua").
+- **Carica PDF o archivio .zip** (Documenti e Impostazioni): uno o più PDF, oppure un .zip (anche con cartelle) che li contiene. Ogni PDF è letto e catalogato come una bolletta di Gmail; un PDF identico a uno già presente viene saltato; i file non PDF sono ignorati.

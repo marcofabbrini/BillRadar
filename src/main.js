@@ -8,6 +8,7 @@ import { eur, num, MONTH_LABELS, years, monthlyByCategory, totals, consumption, 
 import * as gmail from './gmail.js';
 import * as drive from './drive.js';
 import { renderPdf, pdfToText } from './pdf.js';
+import { expandInputs, readFiles, importPdfs } from './importfiles.js';
 import { pushWidget } from './widget.js';
 import { buildGmailQuery, invalidSenders } from './query.js';
 import { assets, assetById, assetLabel, loadAssets, saveAsset, removeAsset, countUnassigned, assignAllUnassigned, learnAssignment, reverifyBills, KIND_LABEL, KIND_ICON } from './assets.js';
@@ -90,8 +91,12 @@ const applyOwner = (bills) => {
   if (state.owner !== 'all' && !owners().has(state.owner)) state.owner = 'all';   // proprietario non più presente
   return state.owner === 'all' ? bills : bills.filter((b) => (b.assetId ? ownedBy(assetById(b.assetId)) : b.ownerKey === state.owner));
 };
+// "scope:car" = tutte le vetture: mostra solo le categorie della tipologia scelta
+const isScopeSel = () => String(state.asset).startsWith('scope:');
+const selScope = () => String(state.asset).slice(6);
 const applyAsset = (bills) => {
   bills = applyOwner(bills);
+  if (isScopeSel()) return bills.filter((b) => scopeOf(b.category) === selScope());
   return state.asset === 'all' ? bills : state.asset === 'none' ? bills.filter((b) => !b.assetId && needsAsset(b)) : bills.filter((b) => b.assetId === state.asset);
 };
 const assetOptions = (value, { all = 'Tutti i beni', none = true, placeholder = null, only = null, owned = false } = {}) => {
@@ -100,8 +105,9 @@ const assetOptions = (value, { all = 'Tutti i beni', none = true, placeholder = 
     const l = assets().filter((a) => a.kind === kind && (!owned || ownedBy(a)));
     return l.length ? `<optgroup label="${label}">${l.map((a) => `<option value="${a.id}" ${a.id === value ? 'selected' : ''}>${esc(assetLabel(a))}</option>`).join('')}</optgroup>` : '';
   };
+  const scopes = placeholder || !all ? '' : `<optgroup label="Per tipologia">${SCOPES.filter((sc) => sc === 'exp' || assets().some((a) => a.kind === sc)).map((sc) => `<option value="scope:${sc}" ${value === 'scope:' + sc ? 'selected' : ''}>${SCOPE_ICON[sc]} Solo ${{ home: "immobili", car: "vetture", other: "altro", exp: "spese" }[sc]}</option>`).join('')}</optgroup>`;
   return (placeholder ? `<option value="">${placeholder}</option>` : `<option value="all" ${value === 'all' ? 'selected' : ''}>${all}</option>`)
-    + grp('home', 'Immobili') + grp('car', 'Vetture') + grp('other', 'Altro')
+    + scopes + grp('home', 'Immobili') + grp('car', 'Vetture') + grp('other', 'Altro')
     + (none && !placeholder ? `<option value="none" ${value === 'none' ? 'selected' : ''}>Senza assegnazione</option>` : '');
 };
 async function setOwner(v) {
@@ -213,9 +219,9 @@ function simpleBars(vals, color) {
 
 async function enabledCats() {
   const out = [];
-  const sel = assetById(state.asset);   // con un immobile o una vettura scelti, solo le voci che li riguardano
+  const sc = isScopeSel() ? selScope() : assetById(state.asset)?.kind;   // con una tipologia o un bene scelti, solo le voci che li riguardano
   for (const [id, c] of Object.entries(cats())) {
-    if (sel && (c.scope || 'home') !== sel.kind) continue;
+    if (sc && (c.scope || 'home') !== sc) continue;
     if ((await getSetting(`cat.${id}`)) !== false) out.push(id);
   }
   return out;
@@ -299,8 +305,10 @@ async function renderDocs() {
       ${[['all', 'Tutti'], ...(state.newIds.size ? [['new', 'Nuove']] : []), ...(assets().length ? [['unassigned', 'Da assegnare']] : []), ['review', 'Da verificare'], ...ids.map((id) => [id, cat(id).label])].map(([k, l]) => `<button class="chip ${f === k ? 'on' : ''}" data-f="${k}">${l}</button>`).join('')}
     </div>
     <div class="card enter" style="--i:1">${rows.length ? rows.map((b) => billRow(b)).join('') : emptyState('Nessun documento', 'Qui compariranno le bollette trovate in Gmail.')}</div>
-    <button class="btn" id="add" style="width:100%">+ Aggiungi manualmente</button>${sel.on ? selBarHtml() : ''}`;
+    <button class="btn" id="add" style="width:100%">+ Aggiungi manualmente</button>
+    <button class="btn sec" id="upBtn" style="width:100%;margin-top:8px">⬆️ Carica PDF o archivio .zip</button>${sel.on ? selBarHtml() : ''}`;
   bindAssetSelect(renderDocs);
+  $('#upBtn').onclick = openImport;
   $('#q').oninput = (e) => { state.q = e.target.value; clearTimeout(renderDocs.t); renderDocs.t = setTimeout(renderDocs, 250); };
   view.querySelectorAll('.chip').forEach((c) => (c.onclick = () => { state.filter = c.dataset.f; renderDocs(); }));
   wireSelection({ selector: '.row[data-id]', attr: 'id', open: openBill, visibleIds: rows.map((b) => b.id), rerender: renderDocs });
@@ -497,6 +505,37 @@ function wireSelection({ selector, attr, open, visibleIds, rerender }) {
 
 // ---------- Duplicati ----------
 const SOURCE_LABEL = { gmail: 'Gmail', manuale: 'manuale', scontrino: 'spesa', drive: 'Drive' };
+
+/** Caricamento di PDF singoli o di archivi .zip. */
+function openImport() {
+  const dlg = $('#dlg');
+  dlg.innerHTML = `<h2 style="margin:0 0 4px">⬆️ Carica documenti</h2>
+    <div class="hint" style="margin-bottom:10px">Scegli uno o più PDF, oppure un archivio .zip con dentro le bollette: vengono letti e catalogati come quelle di Gmail. Un PDF già presente non viene caricato due volte.</div>
+    <input type="file" id="imFile" accept=".pdf,.zip,application/pdf,application/zip,application/x-zip-compressed" multiple hidden>
+    <div id="imBody"><div style="display:flex;gap:8px"><button class="btn" id="imPick">Scegli file…</button><button class="btn sec" id="imClose">Chiudi</button></div></div>`;
+  const body = $('#imBody', dlg);
+  $('#imClose', dlg).onclick = () => dlg.close();
+  $('#imPick', dlg).onclick = () => $('#imFile', dlg).click();
+  $('#imFile', dlg).onchange = async (e) => {
+    const files = [...e.target.files]; e.target.value = '';
+    if (!files.length) return;
+    body.innerHTML = '<div class="s" id="imMsg">Leggo i file…</div><div class="progress" style="display:block;position:static;margin-top:8px"><div style="width:0"></div></div>';
+    const msg = $('#imMsg', dlg), bar = $('.progress div', dlg);
+    try {
+      await new Promise((r) => setTimeout(r, 30));
+      const ex = expandInputs(await readFiles(files));
+      if (!ex.pdfs.length) { body.innerHTML = `<div class="s">Nessun PDF trovato${ex.errors.length ? `: ${esc(ex.errors[0])}` : ''}.</div><div style="margin-top:12px"><button class="btn sec" id="imClose2">Chiudi</button></div>`; $('#imClose2', dlg).onclick = () => dlg.close(); return; }
+      const hook = drive.syncHook();
+      const r = await importPdfs(ex.pdfs, { hooks: hook, onProgress: (i, n, name) => { bar.style.width = `${(i / n) * 100}%`; msg.textContent = `Analizzo ${i}/${n} · ${name}`; } });
+      if (r.newItems.length) await setKV('ui.newBills', [...(await getKV('ui.newBills', [])), ...r.newItems]);
+      body.innerHTML = `<div class="card" style="margin:0"><b>${r.added}</b> document${r.added === 1 ? 'o aggiunto' : 'i aggiunti'}${r.review ? ` · <b>${r.review}</b> da verificare` : ''}<div class="s">${r.skipped} già presenti${ex.ignored ? ` · ${ex.ignored} file ignorati (non PDF)` : ''}${hook.uploaded ? ` · ${hook.uploaded} su Drive` : ''}${r.errors ? ` · ${r.errors} non leggibili: ${esc(r.failed.slice(0, 3).join(', '))}` : ''}${ex.errors.length ? ` · ${esc(ex.errors[0])}` : ''}</div></div>
+        <div style="display:flex;gap:8px;margin-top:12px"><button class="btn" id="imMore">Carica altri</button><button class="btn sec" id="imDone">Fatto</button></div>`;
+      $('#imMore', dlg).onclick = openImport;
+      $('#imDone', dlg).onclick = () => { dlg.close(); route(); };
+    } catch (err) { console.error(err); body.innerHTML = `<div class="s">Errore: ${esc(err.message)}</div><div style="margin-top:12px"><button class="btn sec" id="imClose2">Chiudi</button></div>`; $('#imClose2', dlg).onclick = () => dlg.close(); }
+  };
+  dlg.showModal();
+}
 
 async function openDupes() {
   const dlg = $('#dlg');
@@ -1140,6 +1179,7 @@ async function runAction(key) {
       route();
     } else if (key === 'action.exportJson') download(`billradar-${Date.now()}.json`, JSON.stringify(await exportAll(), null, 2), 'application/json');
     else if (key === 'action.dupes') openDupes();
+    else if (key === 'action.upload') openImport();
     else if (key === 'action.exportCsv') download(`billradar-${Date.now()}.csv`, billsToCSV(await listBills()), 'text/csv');
     else if (key === 'action.import') {
       const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'application/json';
@@ -1275,7 +1315,7 @@ window.addEventListener('hashchange', route);
   await loadAssets();
   applyEcg(await getSetting('ui.ecgColor'));
   state.asset = await getKV('ui.asset', 'all');
-  if (!['all', 'none'].includes(state.asset) && !assetById(state.asset)) state.asset = 'all';
+  if (!['all', 'none'].includes(state.asset) && !isScopeSel() && !assetById(state.asset)) state.asset = 'all';
   state.owner = await getKV('ui.owner', 'all');
   if (state.owner !== 'all' && !owners().has(state.owner)) state.owner = 'all';
   state.hidden = new Set(await getKV('ui.hiddenSeries', []));
